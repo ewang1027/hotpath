@@ -53,4 +53,17 @@ struct TapeHeader {
 inline constexpr std::uint32_t kTapeVersion = 1;
 inline constexpr char kTapeMagic[8] = {'H','P','T','A','P','E','\0','\0'};
 
+// Apply one tape event to any book design. Kept in one place so the
+// cross-validator and the benchmark cannot drift apart in how they replay.
+template <typename Book>
+inline void apply(Book& b, const BookEvent& e) {
+  switch (e.type) {
+    case EventType::Add:     b.add(e.order_ref, e.side, e.price, e.shares); break;
+    case EventType::Execute: b.execute(e.order_ref, e.shares); break;
+    case EventType::Cancel:  b.cancel(e.order_ref, e.shares); break;
+    case EventType::Delete:  b.remove(e.order_ref); break;
+    case EventType::Replace: b.replace(e.order_ref, e.new_ref, e.price, e.shares); break;
+  }
+}
+
 } // namespace hotpath::book

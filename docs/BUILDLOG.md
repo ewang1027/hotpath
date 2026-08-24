@@ -92,6 +92,13 @@ keeps the time-priority ordering the fill model needs.
 
 ### Traps hit
 
+- **A stale number got into the docs anyway.** The memmove volume was measured
+  with the 8-byte element size from the *reverted* optimisation and reported
+  alongside the 4-byte shipped design, so every "MB memmoved" figure was 2x
+  too high. The element *count* was right; the byte conversion was not. Fixed,
+  and the diagnostic now lives in a committed tool (`src/tape_stat.cpp`) rather
+  than a throwaway script -- which is the exact lesson `simplified_gto_solver`
+  taught and which I still managed to repeat.
 - A randomised differential test caught the intrusive book **silently dropping
   orders** when its level pool filled: `find_or_create_level` returned -1 and
   `add()` just returned. Both bounded designs now count rejections and every
@@ -192,12 +199,70 @@ is the obvious next optimisation.
 
 ---
 
+## Phase 7 — re-quote latency in the fill model  [DONE]
+
+Closes the limitation the README had been declaring: re-quotes were
+instantaneous, so fill counts were an upper bound. `MarketMaker` now takes a
+latency, during which the OLD quote keeps resting at its stale price, and
+`latency_sweep` measures 0 to 10 ms.
+
+**Gate: PASS** — markout degrades monotonically with latency on all four
+symbols, and the zero-latency path reproduces the previously published numbers
+bit-for-bit (9,535 fills, 6.4x overstatement, -0.282 bps).
+
+Headline: latency does not simply cost fills. AAPL's fill *count* is U-shaped
+and ends 15% ABOVE the zero-latency count, with 50% of filled volume on stale
+quotes at 10 ms. A slow maker loses the queue races it wanted and gets filled on
+the quotes it was trying to cancel. Microseconds register because executions
+arrive in bursts: median gap before an execution is 26 us on AAPL and 6.3 us on
+SPY, against ~105 us between events generally.
+
+Also added the `swept` fill path -- our quote being strictly more aggressive
+than the order that actually traded, so an aggressor would have hit us first.
+Unreachable at zero latency (verified: 0 such fills), which is why it never
+showed up before.
+
+### Traps hit
+
+- **A stale number reached the docs.** Memmove volume was measured with the
+  8-byte element size from the *reverted* optimisation and printed next to the
+  4-byte shipped design, so every "MB memmoved" figure was 2x too high. The
+  element count was right; the byte conversion was not. Fixed, and the
+  diagnostic now lives in a committed tool (`src/tape_stat.cpp`) instead of a
+  throwaway script -- the exact lesson from `simplified_gto_solver`, repeated
+  anyway.
+- **`market_maker.hpp` was not self-contained**: it used `book::apply` without
+  including it and only compiled because every existing TU pulled in `tape.hpp`
+  first. A new test exposed it. `apply()` moved to `events.hpp`, where it
+  belongs -- it is about applying an event, not about tapes.
+- **Landing order bug, caught by a test.** A replacement whose latency elapsed
+  between two events was landing only *after* the later event's fills were
+  attributed, so a quote we had long since moved kept being swept at its old
+  price. Pending replacements now take effect before the event's fills, joining
+  the book as it stood when they actually arrived.
+- **Hashing a struct's raw bytes is not deterministic when it has padding.**
+  The pipeline's fill digest did exactly that; adding two bools to `Fill`
+  changed the padding layout and it immediately reported divergence between the
+  threaded and single-threaded paths. The digest had never been sound -- it
+  agreed by luck. Fields are now hashed individually, and a `static_assert`
+  pins `LevelView` (whose byte-wise hash *is* sound) against the same trap.
+- The *initial* quote placement costs latency too. That is correct, not an edge
+  case to design away, and it is part of why a slow maker spends less time
+  quoted -- but it silently made the first version of two tests pass for the
+  wrong reason.
+
+---
+
 ## Remaining / not attempted
 
 Stated as gaps in the README rather than hidden: no network path or kernel
 bypass (the pipeline is threads and shared memory, not sockets); no self-impact
 or re-quote latency in the fill model, so its fill counts are an upper bound;
 one trading day, four symbols.
+
+Known next optimisation, measured but not done: the queue-position bookkeeping
+costs 3-6x book maintenance because re-quoting re-walks the level's FIFO to
+record what is ahead. Tracking it incrementally would remove that.
 
 The highest-value next step is external to the code: run the finished binaries
 on bare-metal x86 Linux for an evening to get real p99/p99.9 tail distributions,

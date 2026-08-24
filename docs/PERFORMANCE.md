@@ -76,22 +76,24 @@ enormous because **real books are deep**:
 
 | symbol | mean live levels | max | level creates/event | elements shifted per create | memmove per replay |
 |---|---:|---:|---:|---:|---:|
-| AAPL | 4,652 | 5,320 | 0.122 | 1,946 | **5,732 MB** |
-| MSFT | 3,463 | 3,813 | 0.040 | 1,334 | 1,043 MB |
-| INTC | 1,576 | 1,723 | 0.014 | 576 | 96 MB |
-| SPY | 699 | 756 | 0.051 | 238 | 416 MB |
+| AAPL | 4,652 | 5,320 | 0.122 | 1,946 | **2,866 MB** |
+| MSFT | 3,463 | 3,813 | 0.040 | 1,334 | 522 MB |
+| INTC | 1,576 | 1,723 | 0.014 | 576 | 48 MB |
+| SPY | 699 | 756 | 0.051 | 238 | 208 MB |
+
+Regenerate with `./build/src/tape_stat <SYM>.tape`.
 
 The predictor is `level_creates_per_event × mean_depth`, and the ranking follows
 it monotonically:
 
 | symbol | predictor | memmove/event | intrusive vs map |
 |---|---:|---:|---:|
-| AAPL | 568 | 3.79 KB | 0.96x |
-| MSFT | 139 | 0.86 KB | 1.23x |
-| SPY | 36 | 0.20 KB | 1.29x |
-| INTC | 22 | 0.13 KB | 1.32x |
+| AAPL | 568 | 1.90 KB | 0.96x |
+| MSFT | 139 | 0.43 KB | 1.23x |
+| SPY | 36 | 0.10 KB | 1.29x |
+| INTC | 22 | 0.06 KB | 1.32x |
 
-AAPL moves 3.79 KB of memory *per event* purely to keep a vector sorted. That
+AAPL moves 1.90 KB of memory *per event* purely to keep a vector sorted. That
 is why the design crosses over from winning by ~30% to losing.
 
 **The generalisation:** a sorted vector is the right level index only when the

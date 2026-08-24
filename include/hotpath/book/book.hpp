@@ -16,6 +16,12 @@ struct LevelView {
   }
 };
 
+// book_crossval hashes snapshots byte-wise to check determinism, which is only
+// sound because LevelView has no padding. Lock that in: adding a differently
+// sized field here would silently start hashing indeterminate bytes and produce
+// spurious "nondeterminism".
+static_assert(sizeof(LevelView) == 12, "LevelView gained padding; hash its fields explicitly");
+
 inline constexpr int kSnapshotDepth = 10;
 
 // Fixed-depth snapshot, used to cross-validate the designs against each other.

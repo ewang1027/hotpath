@@ -178,8 +178,9 @@ private:
   // the theory that the binary search was cache-bound. It measured *slower*
   // (56 -> 66 ns/event), which falsified that theory: the search is not the
   // cost, the insert/erase memmove is. This book runs ~4650 levels deep on
-  // AAPL and shifts ~1946 elements per level create/destroy -- 5.7 GB of
-  // memmove per replay -- so element size matters more than key locality.
+  // AAPL and shifts ~1946 elements per level create/destroy -- 2.9 GB of
+  // memmove per replay at 4 bytes each, and 5.7 GB at 8 -- so element size
+  // matters more than key locality.
   // Kept at 4 bytes for that reason. See docs/PERFORMANCE.md.
   [[nodiscard]] std::size_t lower_bound_pos(Side s, Price px) const noexcept {
     const std::vector<std::int32_t>& v = s == Side::Buy ? bid_idx_ : ask_idx_;

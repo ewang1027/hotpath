@@ -32,6 +32,16 @@ imply — direct-addressed grid plus per-level intrusive FIFO — is 3.3x the
 baseline and keeps the time-priority ordering the fill model needs.
 [Details](docs/PERFORMANCE.md)
 
+**Latency doesn't cost you fills — it changes which fills you get.** Sweeping
+re-quote latency from 0 to 10 ms degrades 10s markout monotonically on every
+symbol (57% worse on AAPL, 6.5x on SPY), but the AAPL fill *count* is U-shaped
+and ends 15% **higher** than at zero latency, with half of all filled volume
+landing on stale quotes. A slow maker doesn't trade less; it loses the queue
+races it wanted and gets filled on the quotes it was trying to cancel. And
+microseconds matter because executions arrive in bursts — the median gap before
+an execution is 26 µs on AAPL and 6.3 µs on SPY, against ~105 µs between events
+generally. [Details](docs/ADVERSE-SELECTION.md#result-4--what-re-quote-latency-actually-costs)
+
 **Pipelining the tick-to-trade path across lock-free rings makes it slower.**
 Splitting feed / book+strategy / gateway across three threads costs a
 near-constant +17 to +20 ns/event on every symbol — the ring hop itself — for a
@@ -106,7 +116,8 @@ include/hotpath/
   book/    four order book designs behind one duck-typed interface
   ipc/     SPSC ring with ordering and padding as policy parameters
   sim/     FIFO queue position, fill model, market maker
-src/       itch_stat, extract_tape, book_crossval, sim_mm, pipeline, litmus_ring
+src/       itch_stat, extract_tape, tape_stat, book_crossval,
+           sim_mm, latency_sweep, pipeline, litmus_ring
 bench/     book design study, false-sharing experiment
 docs/      METHODOLOGY, PERFORMANCE, ADVERSE-SELECTION, BUILDLOG
 ```

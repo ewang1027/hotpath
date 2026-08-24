@@ -102,14 +102,91 @@ with no model of the informed trader at all — and it shows up as a negative
 markout that scales with how much the counterparty had to trade through to reach
 you.
 
+## Result 4 — what re-quote latency actually costs
+
+Everything above assumes re-quotes are instantaneous. They are not, and the
+delay between seeing the touch move and having your quote in the right place is
+the single number every nanosecond of tick-to-trade engineering exists to
+reduce. `latency_sweep` measures what it buys.
+
+Two mechanisms pull in opposite directions:
+
+1. **You join later**, so more participants are ahead of you. Fewer fills.
+2. **Your old quote is still resting at a stale price** while the replacement is
+   in flight. When the market moves away, that stale quote is now the most
+   aggressive one in the book and gets run over. *More* fills — and precisely
+   the ones you did not want.
+
+Mean 10s markout in bps, by re-quote latency:
+
+| latency | AAPL | SPY | MSFT | INTC |
+|---|---:|---:|---:|---:|
+| 0 | −0.259 | −0.011 | −0.180 | −0.422 |
+| 1 µs | −0.251 | −0.013 | −0.181 | −0.414 |
+| 10 µs | −0.256 | −0.021 | −0.194 | −0.449 |
+| 50 µs | −0.300 | −0.030 | −0.229 | −0.540 |
+| 100 µs | −0.304 | −0.043 | −0.254 | −0.531 |
+| 1 ms | −0.352 | −0.054 | −0.275 | −0.553 |
+| 10 ms | **−0.406** | **−0.072** | **−0.319** | **−0.565** |
+
+**Fill quality degrades monotonically with latency on every symbol** — 57% worse
+on AAPL, 77% on MSFT, and 6.5x on SPY, which starts closest to break-even and
+therefore has the most to lose in relative terms.
+
+### The counterintuitive part: latency does not simply cost you fills
+
+| | AAPL fills | stale share of volume | swept fills |
+|---|---:|---:|---:|
+| 0 | 9,535 | 0.0% | 0 |
+| 1 µs | 10,518 | 10.2% | 989 |
+| 100 µs | 9,456 | 16.5% | 1,255 |
+| 10 ms | **11,014** | **50.0%** | 4,501 |
+
+On AAPL the fill count is *U-shaped*: it rises at microsecond latency, dips in
+the middle, and rises again past a millisecond — ending 15% **above** the
+zero-latency count. By 10 ms, **half of all filled volume is on stale quotes**.
+
+So the naive intuition ("slow means you miss fills") is wrong on the most active
+symbol. Latency does not reduce how much you trade so much as it changes *what*
+you trade: you lose the queue races you wanted to win and get filled on the
+quotes you were trying to cancel. SPY, MSFT and INTC do show declining fill
+counts, but their markouts degrade all the same — the mix shifts even when the
+volume falls.
+
+### Why microseconds register at all
+
+The median gap between events on AAPL is 105 µs, which makes a 1 µs delay look
+irrelevant. It is not, because **executions arrive in bursts far tighter than
+the average**:
+
+| symbol | median inter-event gap | median gap preceding an *execution* | gaps < 1 µs |
+|---|---:|---:|---:|
+| AAPL | 105 µs | **26 µs** | 5.0% |
+| SPY | 108 µs | **6.3 µs** | 4.1% |
+
+Fills happen during bursts, and during bursts the market moves in microseconds.
+Latency bites exactly when it matters. Regenerate with
+`./build/src/tape_stat <SYM>.tape`.
+
+### A caveat on the dollar figures
+
+`latency_sweep` also prints a P&L proxy (markout × filled shares). Read the
+markout column, not that one. This strategy has *negative* edge at every latency
+— it quotes at the touch unconditionally, with no inventory management, no
+skew, and no toxicity filter — so "trade less" mechanically improves P&L. On
+INTC, higher latency therefore looks *better* on the dollar axis while fill
+quality is plainly getting worse. Per-share markout is the honest metric for a
+strategy that should not be trading in the first place.
+
 ## Honest limitations
 
 - **No self-impact.** Our order is hypothetical and never enters the book, so it
   never deters or attracts anyone else's order. A real 100-share quote at the
   touch would change the flow it is measuring.
-- **No latency.** Re-quotes are instantaneous. In reality the touch moves and
-  you arrive late, which makes queue position *worse* than modelled — so the
-  fill counts above are still an upper bound.
+- **The strategy is deliberately trivial.** Join the touch, re-quote when it
+  moves. It is a measurement instrument for the fill model, not a proposal.
+- **Latency is modelled as a fixed delay**, symmetric for cancels and new
+  orders, with no queueing or jitter.
 - **Queue-position-only fill priority.** Hidden orders, odd-lot handling, and
   non-displayed liquidity are not modelled; ITCH does not show them.
 - **One day, four symbols.** The direction of every result is consistent across

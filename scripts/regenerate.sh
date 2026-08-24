@@ -34,3 +34,22 @@ for s in "${SYMS[@]}"; do ./build/src/book_crossval "$TAPE_DIR/$s.tape"; done
 
 echo; echo "===== design study (docs/PERFORMANCE.md) ====="
 for s in "${SYMS[@]}"; do ./build/bench/bench_book "$TAPE_DIR/$s.tape" --trials "$TRIALS"; done
+
+echo; echo "===== tape structure: depth, churn, inter-event timing ====="
+for s in "${SYMS[@]}"; do ./build/src/tape_stat "$TAPE_DIR/$s.tape"; done
+
+echo; echo "===== SPSC ring: memory ordering + false sharing ====="
+./build/src/litmus_ring --rounds 10
+./build/bench/bench_ring --trials 12 --messages 20000000
+
+echo; echo "===== fills and adverse selection (docs/ADVERSE-SELECTION.md) ====="
+for s in "${SYMS[@]}"; do ./build/src/sim_mm "$TAPE_DIR/$s.tape" --size 100; done
+
+echo; echo "===== latency sweep (docs/ADVERSE-SELECTION.md result 4) ====="
+for s in "${SYMS[@]}"; do ./build/src/latency_sweep "$TAPE_DIR/$s.tape" --size 100; done
+
+echo; echo "===== threaded pipeline (docs/PERFORMANCE.md) ====="
+for s in "${SYMS[@]}"; do ./build/src/pipeline "$TAPE_DIR/$s.tape" --trials 5; done
+
+echo; echo "===== determinism ====="
+RUNS=5 ./scripts/check_determinism.sh

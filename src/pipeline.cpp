@@ -42,11 +42,25 @@ struct FeedMsg { BookEvent ev; std::uint32_t eof; };
 struct FillMsg { Fill fill;    std::uint32_t eof; };
 
 // FNV-1a over the fill stream, in order.
+//
+// Fields are hashed individually rather than as raw struct bytes. Fill contains
+// padding, padding is indeterminate, and copying the struct through a ring
+// carries whatever happened to be in those bytes -- so a byte-wise digest
+// compares garbage and reports spurious divergence. The first version did
+// exactly that and only agreed by luck until a field was added.
 struct Digest {
   std::uint64_t h{1469598103934665603ull};
+  void mix(std::uint64_t v) noexcept {
+    for (int i = 0; i < 8; ++i) { h ^= (v >> (8 * i)) & 0xff; h *= 1099511628211ull; }
+  }
   void feed(const Fill& f) noexcept {
-    const auto* b = reinterpret_cast<const std::uint8_t*>(&f);
-    for (std::size_t i = 0; i < sizeof(Fill); ++i) { h ^= b[i]; h *= 1099511628211ull; }
+    mix(f.ts);
+    mix(f.price);
+    mix(f.qty);
+    mix(static_cast<std::uint64_t>(f.side));
+    mix(f.queue_ahead_at_join);
+    mix(f.stale ? 1u : 0u);
+    mix(f.swept ? 1u : 0u);
   }
 };
 
