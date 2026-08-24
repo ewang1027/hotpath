@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(Catch2)
 add_executable(hotpath_tests
   test_open_hash.cpp
   test_itch.cpp
+  test_book.cpp
 )
 target_link_libraries(hotpath_tests PRIVATE hotpath hotpath_instrument Catch2::Catch2WithMain)
 target_include_directories(hotpath_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

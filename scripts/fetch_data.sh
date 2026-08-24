@@ -30,17 +30,30 @@ done
 have=$(stat -f%z "$GZ" 2>/dev/null || echo 0)
 if [[ "$have" -lt "$expected" ]]; then echo "FAILED: incomplete after retries" >&2; exit 1; fi
 
-# Verify against Nasdaq's published md5 before spending 12 GB of disk on it.
+# Verify against Nasdaq's published md5 when there is one. Note that the
+# directory listing advertises a .md5sum for every day but some of them 404
+# (12302019 does) and the server renders the 404 as an HTML page with a 200-ish
+# body, so a naive fetch-and-compare silently diffs against HTML. Require the
+# fetched text to actually look like an md5 before trusting it.
 curl -sS -L -o "$GZ.md5sum" "$BASE/${DAY}.NASDAQ_ITCH50.gz.md5sum" || true
-if [[ -s "$GZ.md5sum" ]]; then
-  want=$(awk '{print $1}' "$GZ.md5sum")
+want=""
+if [[ -s "$GZ.md5sum" ]]; then want=$(awk 'NR==1{print $1}' "$GZ.md5sum"); fi
+if [[ "$want" =~ ^[0-9a-fA-F]{32}$ ]]; then
   got=$(md5 -q "$GZ")
   if [[ "$want" == "$got" ]]; then echo "md5 OK ($got)"
   else echo "md5 MISMATCH: want=$want got=$got" >&2; exit 1; fi
+else
+  rm -f "$GZ.md5sum"
+  echo "note: no valid published md5 for $DAY; relying on gzip CRC32 instead."
+  echo "      (gunzip verifies a CRC over the whole decompressed stream, which"
+  echo "       is a stronger end-to-end check than the md5 would have been.)"
 fi
 
 if [[ ! -s "$RAW" ]]; then
-  echo "decompressing -> $RAW"
-  gunzip -c "$GZ" > "$RAW"
+  echo "decompressing -> $RAW (verifying CRC32)"
+  if ! gunzip -c "$GZ" > "$RAW"; then
+    echo "FAILED: gzip CRC error -- archive is corrupt, delete it and re-run" >&2
+    rm -f "$RAW"; exit 1
+  fi
 fi
 echo "ready: $RAW ($(stat -f%z "$RAW") bytes)"
