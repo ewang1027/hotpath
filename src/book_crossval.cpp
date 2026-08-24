@@ -22,6 +22,23 @@ using namespace hotpath::book;
 
 namespace {
 
+// FNV-1a over every snapshot of every design, in order. Two runs that produce
+// the same digest performed bit-identical work; a build flag or a container
+// iteration order that leaked nondeterminism into the replay would change it.
+struct Digest {
+  std::uint64_t h{1469598103934665603ull};
+  void feed(const void* p, std::size_t n) noexcept {
+    const auto* b = static_cast<const std::uint8_t*>(p);
+    for (std::size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ull; }
+  }
+  void feed(const Snapshot& s) noexcept {
+    feed(&s.nbid, sizeof s.nbid);
+    feed(&s.nask, sizeof s.nask);
+    feed(s.bid, sizeof(LevelView) * static_cast<std::size_t>(s.nbid));
+    feed(s.ask, sizeof(LevelView) * static_cast<std::size_t>(s.nask));
+  }
+};
+
 void dump(const char* tag, const Snapshot& s) {
   std::printf("  %-10s bids:", tag);
   for (int i = 0; i < s.nbid; ++i)
@@ -64,6 +81,7 @@ int main(int argc, char** argv) {
   HybridBook d(win.lo, win.hi, 1u << 21, 1u << 20);
 
   Snapshot sa{}, sb{}, sc{}, sd{};
+  Digest digest;
   const BookEvent* ev = tape.events();
   std::uint64_t diverged = 0;
 
@@ -75,6 +93,7 @@ int main(int argc, char** argv) {
 
     if (i % check_every) continue;
     a.snapshot(sa); b.snapshot(sb); c.snapshot(sc); d.snapshot(sd);
+    digest.feed(sa); digest.feed(sb); digest.feed(sc); digest.feed(sd);
     if (!(sa == sb) || !(sa == sc) || !(sa == sd)) {
       if (++diverged <= 3) {
         std::printf("\nDIVERGENCE at event %zu (type=%d ref=%" PRIu64 " px=%u sh=%u)\n",
@@ -88,6 +107,7 @@ int main(int argc, char** argv) {
   }
 
   std::printf("\n-- results --\n");
+  std::printf("digest          : %016llx\n", (unsigned long long)digest.h);
   std::printf("comparisons     : %zu\n", (tape.size() + check_every - 1) / check_every);
   std::printf("divergences     : %" PRIu64 "\n", diverged);
   std::printf("final orders    : map=%zu intrusive=%zu flat=%zu hybrid=%zu\n",

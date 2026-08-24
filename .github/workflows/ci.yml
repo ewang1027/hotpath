@@ -1,0 +1,56 @@
+name: ci
+
+# CI runs every gate that does not need the market data file. The ITCH sample is
+# 3.5 GB compressed / 8.25 GB raw, so the full-day parse, the four-way book
+# cross-validation over real tapes, and the design study are local-only via
+# scripts/regenerate.sh. What CI *can* run is the randomised differential test
+# between all four book designs, the invariant checks, the ring stress test and
+# the sanitizers -- which is where the real correctness risk lives anyway.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # arm64 runner on purpose: the memory-ordering litmus test is only
+    # meaningful on a weakly-ordered machine.
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            flags: "-DCMAKE_BUILD_TYPE=Release"
+          - name: tsan
+            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOTPATH_TSAN=ON"
+          - name: asan-ubsan
+            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOTPATH_ASAN=ON"
+    name: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: brew install ninja
+      - name: Configure
+        run: cmake -S . -B build -G Ninja ${{ matrix.flags }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  litmus:
+    # The memory-ordering demonstration. Only asserts that the release/acquire
+    # ring is clean -- whether the relaxed variant *reproduces* a violation on a
+    # given run is microarchitectural and must not gate CI.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install ninja
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build
+      - name: Environment report
+        run: ./build/src/hotpath_env
+      - name: SPSC memory-ordering litmus
+        run: ./build/src/litmus_ring --rounds 5
