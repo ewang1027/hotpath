@@ -102,6 +102,38 @@ with no model of the informed trader at all — and it shows up as a negative
 markout that scales with how much the counterparty had to trade through to reach
 you.
 
+## Replication across 25 symbols
+
+Results 1–3 were first measured on four symbols. Four points can describe almost
+any curve, so the study was widened to 25 spanning $7 (SIRI) to $1,784 (AMZN)
+and 70K to 2.4M events — 18,798,869 events in total, all four book designs
+cross-validating with **zero divergences** on every one.
+
+| finding | replication |
+|---|---|
+| Naive model overstates filled volume | **25 / 25**, from 3.4x to **15.6x**, median 5.7x |
+| Passive fills are adversely selected (negative 10s markout) | **25 / 25** |
+| Markout worsens with queue depth | **10 / 13** symbols with ≥200 fills in both buckets |
+
+**The overstatement is worse than the four-symbol sample suggested.** The
+original range was 3.7–6.4x; across 25 it reaches **15.6x on SIRI** and 12.9x on
+AMZN. The pattern is systematic: the overstatement is largest exactly where you
+fill least. SPY (12,058 fills) and MSFT (9,403) sit at 3.7x, while SIRI (82
+fills) and GE (291) are at 15.6x and 12.8x. Where a passive order genuinely
+reaches the front of the queue, the two models converge; where it rarely does,
+assuming it always fills is catastrophically wrong.
+
+**The queue-depth result is real but weaker than four symbols implied.** It
+holds on 10 of the 13 symbols with enough fills in both buckets to compare
+(AAPL, AMD, PFE, WFC, KO, MSFT, SPY, IWM, QQQ, XOM) and fails on three (CSCO,
+INTC, JPM). Reported as a directional effect, not a law. The 12 remaining
+symbols have too few deep-queue fills — often fewer than 100 — to say anything,
+and are excluded rather than counted as support.
+
+Where it does hold it can be large: AMZN's deep bucket is −4.92 bps against
+−0.89 shallow, and TSLA's is −2.73 against −0.79, though both rest on fewer than
+100 deep fills.
+
 ## Result 4 — what re-quote latency actually costs
 
 Everything above assumes re-quotes are instantaneous. They are not, and the

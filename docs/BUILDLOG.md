@@ -296,12 +296,44 @@ prediction rather than quietly re-measured.
 
 ---
 
+## Phase 9 — cross-sectional replication, 25 symbols  [DONE]
+
+Every headline result had been measured on four symbols. Four points can
+describe almost any curve, so the study was widened to 25 spanning $7 (SIRI) to
+$1,784 (AMZN) and 70K to 2.4M events -- 18,798,869 events total, extracted in
+one pass over the same day.
+
+**Gate: PASS** -- all four book designs cross-validate with zero divergences on
+all 25 tapes.
+
+What replicated, and what did not:
+- Naive fill model overstates volume: **25/25**, but the range widened from
+  3.7-6.4x to **3.4-15.6x**. Largest exactly where you fill least (SIRI 15.6x
+  on 82 fills; SPY 3.7x on 12,058).
+- Passive fills adversely selected: **25/25**.
+- Markout worsens with queue depth: **10/13** symbols with >=200 fills in both
+  buckets. Real and directional, but weaker than four symbols implied -- now
+  reported as such, with the 12 low-sample symbols excluded rather than counted
+  as support.
+- The intrusive book's failure: **7/25 symbols** lose to `std::map`, up to 1.9x
+  (AMZN). The predictor `level churn x depth` has **Pearson r = -0.927**
+  (Spearman -0.871) against the intrusive-vs-map ratio.
+
+The most useful thing the wider sample bought was killing a wrong explanation.
+With four symbols the losers were the expensive ones and price looked like the
+cause (r = -0.837). The ETFs break it: SPY at $321 wins with 699 mean levels
+while AAPL at $250 loses with 4,652. Depth is what the sorted vector pays for;
+price merely tends to produce depth (r = +0.630). A four-symbol sample would
+have shipped the price story.
+
+---
+
 ## Remaining / not attempted
 
 Stated as gaps in the README rather than hidden: no network path or kernel
 bypass (the pipeline is threads and shared memory, not sockets); no self-impact
-or re-quote latency in the fill model, so its fill counts are an upper bound;
-one trading day, four symbols.
+in the fill model, and its latency is a fixed delay with no jitter; 25 symbols
+but **one trading day** -- the cross-section is wide, the time series is n=1.
 
 The highest-value next step is external to the code: run the finished binaries
 on bare-metal x86 Linux for an evening to get real p99/p99.9 tail distributions,

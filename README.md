@@ -10,27 +10,32 @@ Everything below is from one full trading day — 2019-12-30, 8.25 GB,
 
 ## Results
 
-**The naive fill model overstates passive volume by 3.7x to 6.4x.** Simulating a
-market maker joining the touch, a model that fills whenever the price trades
-books 3.5M shares on AAPL; a model that tracks FIFO queue position — and
-advances it when orders ahead are *cancelled*, not just executed — books 549K.
+**The naive fill model overstates passive volume by 3.4x to 15.6x** (median
+5.7x, measured on 25 symbols). Simulating a market maker joining the touch, a
+model that fills whenever the price trades books 3.5M shares on AAPL; a model
+that tracks FIFO queue position — and advances it when orders ahead are
+*cancelled*, not just executed — books 549K. The error is worst exactly where
+you fill least: 3.7x on SPY, 15.6x on SIRI.
 [Details](docs/ADVERSE-SELECTION.md)
 
-**Passive fills are adversely selected, and it gets worse the deeper you are in
-the queue.** 10-second markouts are negative almost everywhere, and on AAPL they
-degrade ~4x from the shallowest queue bucket to the 501–2000 bucket. To fill from
-deep in a queue the market must trade *through* everything ahead of you, which is
-exactly when you did not want the fill. SPY — a broad index ETF — shows an order
-of magnitude less adverse selection than the single names, which is the expected
-result recovered from data.
+**Passive fills are adversely selected — on 25 of 25 symbols.** 10-second
+markouts are negative everywhere, and they worsen with queue depth on 10 of the
+13 symbols with enough fills to judge (on AAPL, ~4x from the shallowest bucket
+to 501–2000). To fill from deep in a queue the market must trade *through*
+everything ahead of you, which is exactly when you did not want the fill. SPY —
+a broad index ETF — shows an order of magnitude less adverse selection than the
+single names, the expected result recovered from data.
 
-**The "textbook HFT" order book is the slowest of four designs on the most
-active symbol.** The pooled, zero-allocation, intrusive book loses even to
-`std::map` on AAPL, because real books run ~4,650 price levels deep and its
-sorted level vector memmoves 5.7 GB per replay. The design the measurements
-imply — direct-addressed grid plus per-level intrusive FIFO — is 3.3x the
-baseline and keeps the time-priority ordering the fill model needs.
-[Details](docs/PERFORMANCE.md)
+**The "textbook HFT" order book loses to `std::map` on 7 of 25 symbols.** The
+pooled, zero-allocation, intrusive book is beaten by up to 1.9x (AMZN), because
+its sorted level vector shifts hundreds to thousands of elements per event on
+deep books. The predictor is `level churn × depth` with **Pearson r = −0.927**,
+and the crossover is sharp — MSFT still wins at 139 elements shifted per event,
+FB already loses at 411. It looks like a price effect until the ETFs break it:
+SPY at $321 wins with 699 levels while AAPL at $250 loses with 4,652. The design
+the measurements imply — direct-addressed grid plus per-level intrusive FIFO —
+beats `std::map` on all 25 (median 2.62x) and the intrusive book on all 25 (up
+to 7.3x). [Details](docs/PERFORMANCE.md)
 
 **Latency doesn't cost you fills — it changes which fills you get.** Sweeping
 re-quote latency from 0 to 10 ms degrades 10s markout monotonically on every
@@ -63,7 +68,7 @@ which is what makes this class of bug so dangerous.
 
 | gate | result |
 |---|---|
-| Four independent book designs, ten-deep snapshot compared after **every** event | **0 divergences** over 5,609,721 events |
+| Four independent book designs, ten-deep snapshot compared after **every** event | **0 divergences** over 18,798,869 events across 25 symbols |
 | All four drain to zero resting orders at the close | yes |
 | Full-day parse: framing, spec lengths, referential integrity | **0** orphaned references over 268.7M messages |
 | Every order live at peak (1,924,078) accounted for by the close | yes |

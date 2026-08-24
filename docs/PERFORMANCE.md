@@ -61,11 +61,12 @@ the dense path allocates nothing.
 
 ## Findings
 
-### 1. The textbook intrusive book is the *worst* design on the most active symbol
+### 1. The textbook intrusive book loses to `std::map` on 7 of 25 symbols
 
 This is the result that surprised me. The pooled, intrusive, zero-allocation
-book — the design everyone describes as "the HFT one" — **loses to `std::map`
-on AAPL** (0.96x, and 0.91x once you query the touch).
+book — the design everyone describes as "the HFT one" — **loses to `std::map`**
+on AMZN, GOOGL, TSLA, NFLX, NVDA, AAPL and FB, by as much as **1.9x** (AMZN:
+133.2 ns/event against `std::map`'s 70.8).
 
 It is not the binary search. I assumed it was, stored the price inline in the
 index vector to make the search cache-friendly, and it got *worse*: 56 → 66
@@ -83,23 +84,55 @@ enormous because **real books are deep**:
 
 Regenerate with `./build/src/tape_stat <SYM>.tape`.
 
-The predictor is `level_creates_per_event × mean_depth`, and the ranking follows
-it monotonically:
+### The predictor, across 25 symbols
 
-| symbol | predictor | memmove/event | intrusive vs map |
-|---|---:|---:|---:|
-| AAPL | 568 | 1.90 KB | 0.96x |
-| MSFT | 139 | 0.43 KB | 1.23x |
-| SPY | 36 | 0.10 KB | 1.29x |
-| INTC | 22 | 0.06 KB | 1.32x |
+Four symbols can describe almost any curve, so the study was widened to 25
+spanning $7 to $1,784 and 70K to 2.4M events. The predictor is
+`level_creates_per_event × mean_depth` — the number of vector elements shifted
+per event — and it explains the ranking almost completely:
 
-AAPL moves 1.90 KB of memory *per event* purely to keep a vector sorted. That
-is why the design crosses over from winning by ~30% to losing.
+**Pearson r = −0.927** between `log10(elements shifted per event)` and the
+intrusive-vs-`std::map` ratio (Spearman −0.871, n = 25).
+
+| symbol | ~price | mean depth | elements shifted/event | intrusive vs map |
+|---|---:|---:|---:|---:|
+| AMZN | $1,784 | 4,491 | 1,725 | **0.53x** |
+| TSLA | $338 | 2,993 | 1,078 | **0.68x** |
+| NVDA | $208 | 2,734 | 694 | **0.82x** |
+| GOOGL | $1,280 | 1,750 | 691 | **0.68x** |
+| NFLX | $325 | 2,106 | 689 | **0.82x** |
+| AAPL | $250 | 4,652 | 568 | **0.97x** |
+| FB | $195 | 2,583 | 411 | **0.99x** |
+| MSFT | $147 | 3,463 | 139 | 1.26x |
+| QQQ | $212 | 2,177 | 137 | 1.19x |
+| SPY | $321 | 699 | 36 | 1.27x |
+| INTC | $56 | 1,576 | 22 | 1.31x |
+| … | | | | |
+| GE | $11 | 312 | 1.2 | 1.43x |
+| F | $9 | 219 | 1.1 | 1.74x |
+
+The crossover is sharp and sits between ~140 and ~410 elements shifted per
+event: MSFT still wins at 139, FB already loses at 411.
+
+### It is depth and churn, not price
+
+Price looks like the driver — the seven losers are the seven most expensive
+single names — and it does correlate (r = −0.837). But it is a proxy, and the
+ETFs break it:
+
+- **SPY at $321 wins** (1.27x) with a mean depth of just **699 levels**.
+- **AAPL at $250 loses** (0.97x) with a mean depth of **4,652**.
+
+A broad-index ETF concentrates enormous liquidity into a tight band around the
+touch, so despite a high price its book is shallow. A high-priced single name
+accumulates resting orders scattered across thousands of distinct penny levels.
+Depth is what the sorted vector pays for; price merely tends to produce depth
+(r = +0.630 between log price and depth).
 
 **The generalisation:** a sorted vector is the right level index only when the
 book is shallow. Textbook descriptions of this design quietly assume a book tens
-of levels deep. A real one is thousands, because of resting orders far from the
-touch that never trade (see finding 3).
+of levels deep. Real books here run from 125 (IWM) to 4,652 (AAPL), and the
+design fails wherever churn × depth crosses a few hundred elements per event.
 
 ### 2. Direct addressing wins, and the hybrid gets it without giving up queue position
 
@@ -107,6 +140,10 @@ The flat grid is 2.5–3.6x the baseline because price lookup is arithmetic and
 nothing ever shifts. But an aggregate-only grid throws away *which* orders are
 resting at a level, and ITCH fills a level in strict time priority — so that
 FIFO order **is** queue position, which the fill model in Phase 4 depends on.
+
+Across all 25 symbols the hybrid beats `std::map` by **1.96x to 3.89x**
+(median 2.62x) and beats the intrusive design on **25 of 25**, by up to **7.3x**
+(AMZN: 18.2 ns/event against 133.2).
 
 The hybrid keeps the grid's addressing and restores the per-level intrusive
 FIFO over a pooled level store. It costs ~3–13% versus flat on maintenance, and

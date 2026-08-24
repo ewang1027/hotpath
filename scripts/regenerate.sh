@@ -53,3 +53,10 @@ for s in "${SYMS[@]}"; do ./build/src/pipeline "$TAPE_DIR/$s.tape" --trials 5; d
 
 echo; echo "===== determinism ====="
 RUNS=5 ./scripts/check_determinism.sh
+
+echo; echo "===== cross-sectional study, every tape (docs/PERFORMANCE.md finding 1) ====="
+# The core four symbols above carry the detailed reports; this widens the design
+# study across every extracted tape, which is what the r=-0.927 predictor and the
+# "7 of 25 lose to std::map" claim rest on. Extract more tapes first with:
+#   ./build/src/extract_tape <raw> --symbol X --symbol Y ... --out "$TAPE_DIR"
+./scripts/symbol_sweep.sh
