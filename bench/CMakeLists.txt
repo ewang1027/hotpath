@@ -1,1 +1,2 @@
-# Benchmark targets are added as each phase lands.
+add_executable(bench_book bench_book.cpp)
+target_link_libraries(bench_book PRIVATE hotpath hotpath_instrument)

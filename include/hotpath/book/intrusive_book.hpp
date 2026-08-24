@@ -93,10 +93,12 @@ public:
   }
 
   [[nodiscard]] Price best_bid() const noexcept {
-    return bid_idx_.empty() ? kInvalidPrice : levels_[static_cast<std::size_t>(bid_idx_.front())].price;
+    return bid_idx_.empty() ? kInvalidPrice
+                            : levels_[static_cast<std::size_t>(bid_idx_.front())].price;
   }
   [[nodiscard]] Price best_ask() const noexcept {
-    return ask_idx_.empty() ? kInvalidPrice : levels_[static_cast<std::size_t>(ask_idx_.front())].price;
+    return ask_idx_.empty() ? kInvalidPrice
+                            : levels_[static_cast<std::size_t>(ask_idx_.front())].price;
   }
 
   void snapshot(Snapshot& s) const noexcept {
@@ -130,6 +132,11 @@ public:
   [[nodiscard]] std::size_t levels_in_use() const noexcept {
     return levels_.size() - free_levels_.size();
   }
+  [[nodiscard]] std::uint64_t level_creates() const noexcept { return level_creates_; }
+  [[nodiscard]] std::uint64_t level_destroys() const noexcept { return level_destroys_; }
+  [[nodiscard]] std::uint64_t elements_shifted() const noexcept { return shifted_; }
+  [[nodiscard]] std::size_t bid_levels() const noexcept { return bid_idx_.size(); }
+  [[nodiscard]] std::size_t ask_levels() const noexcept { return ask_idx_.size(); }
 
   // --- exposed for the queue-position model in sim/ ---
   struct Order {
@@ -166,6 +173,14 @@ private:
   }
 
   // Returns the position where `px` belongs in the side's sorted index vector.
+  //
+  // NOTE: an earlier version stored the price inline here (8-byte entries) on
+  // the theory that the binary search was cache-bound. It measured *slower*
+  // (56 -> 66 ns/event), which falsified that theory: the search is not the
+  // cost, the insert/erase memmove is. This book runs ~4650 levels deep on
+  // AAPL and shifts ~1946 elements per level create/destroy -- 5.7 GB of
+  // memmove per replay -- so element size matters more than key locality.
+  // Kept at 4 bytes for that reason. See docs/PERFORMANCE.md.
   [[nodiscard]] std::size_t lower_bound_pos(Side s, Price px) const noexcept {
     const std::vector<std::int32_t>& v = s == Side::Buy ? bid_idx_ : ask_idx_;
     std::size_t lo = 0, hi = v.size();
@@ -187,6 +202,8 @@ private:
     free_levels_.pop_back();
     Level& L = levels_[static_cast<std::size_t>(li)];
     L.price = px; L.qty = 0; L.orders = 0; L.head = -1; L.tail = -1;
+    ++level_creates_;
+    shifted_ += v.size() - pos;      // elements memmove'd by this insert
     v.insert(v.begin() + static_cast<std::ptrdiff_t>(pos), li);
     return li;
   }
@@ -196,6 +213,8 @@ private:
     const Price px = levels_[static_cast<std::size_t>(li)].price;
     const std::size_t pos = lower_bound_pos(s, px);
     if (pos < v.size() && v[pos] == li) {
+      ++level_destroys_;
+      shifted_ += v.size() - pos - 1;
       v.erase(v.begin() + static_cast<std::ptrdiff_t>(pos));
       free_levels_.push_back(li);
     }
@@ -238,6 +257,9 @@ private:
   std::vector<std::int32_t> ask_idx_;
   OpenHashMap<std::int32_t> ids_;
   std::uint64_t rejected_{0};
+  std::uint64_t level_creates_{0};
+  std::uint64_t level_destroys_{0};
+  std::uint64_t shifted_{0};
 };
 
 } // namespace hotpath::book

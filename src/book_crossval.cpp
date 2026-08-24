@@ -6,6 +6,7 @@
 // which event diverged, and three that agree over ~10^8 operations are unlikely
 // to be wrong in the same way.
 #include "hotpath/book/flat_book.hpp"
+#include "hotpath/book/hybrid_book.hpp"
 #include "hotpath/book/intrusive_book.hpp"
 #include "hotpath/book/map_book.hpp"
 #include "hotpath/book/tape.hpp"
@@ -60,8 +61,9 @@ int main(int argc, char** argv) {
   MapBook a;
   IntrusiveBook b(1u << 21, 1u << 20);
   FlatBook c(win.lo, win.hi, 1u << 21);
+  HybridBook d(win.lo, win.hi, 1u << 21, 1u << 20);
 
-  Snapshot sa{}, sb{}, sc{};
+  Snapshot sa{}, sb{}, sc{}, sd{};
   const BookEvent* ev = tape.events();
   std::uint64_t diverged = 0;
 
@@ -69,16 +71,18 @@ int main(int argc, char** argv) {
     apply(a, ev[i]);
     apply(b, ev[i]);
     apply(c, ev[i]);
+    apply(d, ev[i]);
 
     if (i % check_every) continue;
-    a.snapshot(sa); b.snapshot(sb); c.snapshot(sc);
-    if (!(sa == sb) || !(sa == sc)) {
+    a.snapshot(sa); b.snapshot(sb); c.snapshot(sc); d.snapshot(sd);
+    if (!(sa == sb) || !(sa == sc) || !(sa == sd)) {
       if (++diverged <= 3) {
         std::printf("\nDIVERGENCE at event %zu (type=%d ref=%" PRIu64 " px=%u sh=%u)\n",
                     i, static_cast<int>(ev[i].type), ev[i].order_ref, ev[i].price, ev[i].shares);
         dump("map", sa);
         dump("intrusive", sb);
         dump("flat", sc);
+        dump("hybrid", sd);
       }
     }
   }
@@ -86,8 +90,8 @@ int main(int argc, char** argv) {
   std::printf("\n-- results --\n");
   std::printf("comparisons     : %zu\n", (tape.size() + check_every - 1) / check_every);
   std::printf("divergences     : %" PRIu64 "\n", diverged);
-  std::printf("final orders    : map=%zu intrusive=%zu flat=%zu\n",
-              a.order_count(), b.order_count(), c.order_count());
+  std::printf("final orders    : map=%zu intrusive=%zu flat=%zu hybrid=%zu\n",
+              a.order_count(), b.order_count(), c.order_count(), d.order_count());
   std::printf("intrusive levels: %zu in use, rejected=%" PRIu64 "\n",
               b.levels_in_use(), b.rejected());
   std::printf("flat grid ops   : %" PRIu64 "  overflow ops: %" PRIu64 " (%.4f%%), rejected=%" PRIu64 "\n",
@@ -97,8 +101,10 @@ int main(int argc, char** argv) {
               c.rejected());
 
   const bool pass = diverged == 0 && b.rejected() == 0 && c.rejected() == 0 &&
+                    d.rejected() == 0 &&
                     a.order_count() == b.order_count() &&
-                    a.order_count() == c.order_count();
+                    a.order_count() == c.order_count() &&
+                    a.order_count() == d.order_count();
   std::printf("\nGATE: %s\n", pass ? "PASS" : "FAIL");
   return pass ? 0 : 1;
 }
