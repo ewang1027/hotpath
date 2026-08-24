@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 430" width="760" height="430" role="img">
+<text x="78.0" y="24.0" font-size="15" text-anchor="start" fill="#8b949e" font-weight="600" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">Slower re-quoting makes every fill worse</text>
+<text x="78.0" y="42.0" font-size="11.5" text-anchor="start" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">mean 10s markout per fill; more negative = more adversely selected</text>
+<line x1="78.0" y1="368.0" x2="640.0" y2="368.0" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="70.0" y="372.0" font-size="10" text-anchor="end" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">-0.65</text>
+<line x1="78.0" y1="323.4" x2="640.0" y2="323.4" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="70.0" y="327.4" font-size="10" text-anchor="end" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">-0.55</text>
+<line x1="78.0" y1="278.9" x2="640.0" y2="278.9" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="70.0" y="282.9" font-size="10" text-anchor="end" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">-0.46</text>
+<line x1="78.0" y1="234.3" x2="640.0" y2="234.3" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="70.0" y="238.3" font-size="10" text-anchor="end" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">-0.36</text>
+<line x1="78.0" y1="189.7" x2="640.0" y2="189.7" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="70.0" y="193.7" font-size="10" text-anchor="end" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">-0.27</text>
+<line x1="78.0" y1="145.1" x2="640.0" y2="145.1" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="70.0" y="149.1" font-size="10" text-anchor="end" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">-0.17</text>
+<line x1="78.0" y1="100.6" x2="640.0" y2="100.6" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="70.0" y="104.6" font-size="10" text-anchor="end" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">-0.08</text>
+<line x1="78.0" y1="56.0" x2="640.0" y2="56.0" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="70.0" y="60.0" font-size="10" text-anchor="end" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">0.02</text>
+<line x1="78.0" y1="56.0" x2="78.0" y2="368.0" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="78.0" y="386.0" font-size="10" text-anchor="middle" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">0</text>
+<line x1="190.4" y1="56.0" x2="190.4" y2="368.0" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="190.4" y="386.0" font-size="10" text-anchor="middle" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">1 us</text>
+<line x1="302.8" y1="56.0" x2="302.8" y2="368.0" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="302.8" y="386.0" font-size="10" text-anchor="middle" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">10 us</text>
+<line x1="415.2" y1="56.0" x2="415.2" y2="368.0" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="415.2" y="386.0" font-size="10" text-anchor="middle" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">100 us</text>
+<line x1="527.6" y1="56.0" x2="527.6" y2="368.0" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="527.6" y="386.0" font-size="10" text-anchor="middle" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">1 ms</text>
+<line x1="640.0" y1="56.0" x2="640.0" y2="368.0" stroke="#8b949e" stroke-width="1" opacity="0.15"/>
+<text x="640.0" y="386.0" font-size="10" text-anchor="middle" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">10 ms</text>
+<line x1="78.0" y1="65.3" x2="640.0" y2="65.3" stroke="#8b949e" stroke-width="1.2" opacity="0.6"/>
+<polyline points="78.0,186.0 190.4,182.2 269.0,184.1 302.8,184.6 381.4,205.1 415.2,206.9 493.8,224.2 527.6,229.3 606.2,256.8 640.0,254.5" fill="none" stroke="#3178c6" stroke-width="2"/>
+<circle cx="78.0" cy="186.0" r="3" fill="#3178c6" opacity="1.0"/>
+<circle cx="190.4" cy="182.2" r="3" fill="#3178c6" opacity="1.0"/>
+<circle cx="269.0" cy="184.1" r="3" fill="#3178c6" opacity="1.0"/>
+<circle cx="302.8" cy="184.6" r="3" fill="#3178c6" opacity="1.0"/>
+<circle cx="381.4" cy="205.1" r="3" fill="#3178c6" opacity="1.0"/>
+<circle cx="415.2" cy="206.9" r="3" fill="#3178c6" opacity="1.0"/>
+<circle cx="493.8" cy="224.2" r="3" fill="#3178c6" opacity="1.0"/>
+<circle cx="527.6" cy="229.3" r="3" fill="#3178c6" opacity="1.0"/>
+<circle cx="606.2" cy="256.8" r="3" fill="#3178c6" opacity="1.0"/>
+<circle cx="640.0" cy="254.5" r="3" fill="#3178c6" opacity="1.0"/>
+<text x="648.0" y="258.5" font-size="11" text-anchor="start" fill="#3178c6" font-weight="600" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">AAPL</text>
+<polyline points="78.0,149.2 190.4,149.6 269.0,154.3 302.8,155.7 381.4,172.0 415.2,183.6 493.8,199.0 527.6,193.4 606.2,211.1 640.0,213.9" fill="none" stroke="#d1495b" stroke-width="2"/>
+<circle cx="78.0" cy="149.2" r="3" fill="#d1495b" opacity="1.0"/>
+<circle cx="190.4" cy="149.6" r="3" fill="#d1495b" opacity="1.0"/>
+<circle cx="269.0" cy="154.3" r="3" fill="#d1495b" opacity="1.0"/>
+<circle cx="302.8" cy="155.7" r="3" fill="#d1495b" opacity="1.0"/>
+<circle cx="381.4" cy="172.0" r="3" fill="#d1495b" opacity="1.0"/>
+<circle cx="415.2" cy="183.6" r="3" fill="#d1495b" opacity="1.0"/>
+<circle cx="493.8" cy="199.0" r="3" fill="#d1495b" opacity="1.0"/>
+<circle cx="527.6" cy="193.4" r="3" fill="#d1495b" opacity="1.0"/>
+<circle cx="606.2" cy="211.1" r="3" fill="#d1495b" opacity="1.0"/>
+<circle cx="640.0" cy="213.9" r="3" fill="#d1495b" opacity="1.0"/>
+<text x="648.0" y="217.9" font-size="11" text-anchor="start" fill="#d1495b" font-weight="600" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">MSFT</text>
+<polyline points="78.0,261.9 190.4,258.2 269.0,269.8 302.8,274.5 381.4,316.9 415.2,312.7 493.8,316.4 527.6,322.9 606.2,327.6 640.0,328.5" fill="none" stroke="#e08a1e" stroke-width="2"/>
+<circle cx="78.0" cy="261.9" r="3" fill="#e08a1e" opacity="1.0"/>
+<circle cx="190.4" cy="258.2" r="3" fill="#e08a1e" opacity="1.0"/>
+<circle cx="269.0" cy="269.8" r="3" fill="#e08a1e" opacity="1.0"/>
+<circle cx="302.8" cy="274.5" r="3" fill="#e08a1e" opacity="1.0"/>
+<circle cx="381.4" cy="316.9" r="3" fill="#e08a1e" opacity="1.0"/>
+<circle cx="415.2" cy="312.7" r="3" fill="#e08a1e" opacity="1.0"/>
+<circle cx="493.8" cy="316.4" r="3" fill="#e08a1e" opacity="1.0"/>
+<circle cx="527.6" cy="322.9" r="3" fill="#e08a1e" opacity="1.0"/>
+<circle cx="606.2" cy="327.6" r="3" fill="#e08a1e" opacity="1.0"/>
+<circle cx="640.0" cy="328.5" r="3" fill="#e08a1e" opacity="1.0"/>
+<text x="648.0" y="332.5" font-size="11" text-anchor="start" fill="#e08a1e" font-weight="600" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">INTC</text>
+<polyline points="78.0,70.4 190.4,71.4 269.0,73.7 302.8,75.1 381.4,79.3 415.2,85.3 493.8,88.1 527.6,90.5 606.2,95.6 640.0,98.9" fill="none" stroke="#2a9d5c" stroke-width="2"/>
+<circle cx="78.0" cy="70.4" r="3" fill="#2a9d5c" opacity="1.0"/>
+<circle cx="190.4" cy="71.4" r="3" fill="#2a9d5c" opacity="1.0"/>
+<circle cx="269.0" cy="73.7" r="3" fill="#2a9d5c" opacity="1.0"/>
+<circle cx="302.8" cy="75.1" r="3" fill="#2a9d5c" opacity="1.0"/>
+<circle cx="381.4" cy="79.3" r="3" fill="#2a9d5c" opacity="1.0"/>
+<circle cx="415.2" cy="85.3" r="3" fill="#2a9d5c" opacity="1.0"/>
+<circle cx="493.8" cy="88.1" r="3" fill="#2a9d5c" opacity="1.0"/>
+<circle cx="527.6" cy="90.5" r="3" fill="#2a9d5c" opacity="1.0"/>
+<circle cx="606.2" cy="95.6" r="3" fill="#2a9d5c" opacity="1.0"/>
+<circle cx="640.0" cy="98.9" r="3" fill="#2a9d5c" opacity="1.0"/>
+<text x="648.0" y="102.9" font-size="11" text-anchor="start" fill="#2a9d5c" font-weight="600" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">SPY</text>
+<text x="359.0" y="414.0" font-size="11.5" text-anchor="middle" fill="#8b949e" font-weight="normal" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">re-quote latency (log scale; leftmost point is zero)</text>
+<text x="18" y="212" font-size="11.5" fill="#8b949e" text-anchor="middle" transform="rotate(-90 18 212)" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif">mean 10s markout (bps)</text>
+</svg>

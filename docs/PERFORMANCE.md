@@ -84,6 +84,8 @@ enormous because **real books are deep**:
 
 Regenerate with `./build/src/tape_stat <SYM>.tape`.
 
+![Intrusive book speedup vs std::map against vector elements shifted per event](img/design-crossover.svg)
+
 ### The predictor, across 25 symbols
 
 Four symbols can describe almost any curve, so the study was widened to 25

@@ -149,6 +149,8 @@ Two mechanisms pull in opposite directions:
    aggressive one in the book and gets run over. *More* fills — and precisely
    the ones you did not want.
 
+![Mean 10s markout degrading with re-quote latency](img/latency-markout.svg)
+
 Mean 10s markout in bps, by re-quote latency:
 
 | latency | AAPL | SPY | MSFT | INTC |

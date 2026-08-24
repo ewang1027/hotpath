@@ -59,4 +59,7 @@ echo; echo "===== cross-sectional study, every tape (docs/PERFORMANCE.md finding
 # study across every extracted tape, which is what the r=-0.927 predictor and the
 # "7 of 25 lose to std::map" claim rest on. Extract more tapes first with:
 #   ./build/src/extract_tape <raw> --symbol X --symbol Y ... --out "$TAPE_DIR"
-./scripts/symbol_sweep.sh
+./scripts/symbol_sweep.sh | tee /tmp/hotpath_sweep.csv
+
+echo; echo "===== figures (docs/img) ====="
+HOTPATH_SWEEP_CSV=/tmp/hotpath_sweep.csv ./scripts/make_plots.py

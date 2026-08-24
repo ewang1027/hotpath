@@ -26,6 +26,8 @@ everything ahead of you, which is exactly when you did not want the fill. SPY �
 a broad index ETF — shows an order of magnitude less adverse selection than the
 single names, the expected result recovered from data.
 
+<img src="docs/img/design-crossover.svg" alt="Intrusive book speedup vs std::map against vector elements shifted per event, 25 symbols; the design falls below break-even past a few hundred elements per event" width="100%">
+
 **The "textbook HFT" order book loses to `std::map` on 7 of 25 symbols.** The
 pooled, zero-allocation, intrusive book is beaten by up to 1.9x (AMZN), because
 its sorted level vector shifts hundreds to thousands of elements per event on
@@ -36,6 +38,8 @@ SPY at $321 wins with 699 levels while AAPL at $250 loses with 4,652. The design
 the measurements imply — direct-addressed grid plus per-level intrusive FIFO —
 beats `std::map` on all 25 (median 2.62x) and the intrusive book on all 25 (up
 to 7.3x). [Details](docs/PERFORMANCE.md)
+
+<img src="docs/img/latency-markout.svg" alt="Mean 10s markout per fill degrading monotonically as re-quote latency rises from zero to 10 ms, on AAPL, MSFT, INTC and SPY" width="100%">
 
 **Latency doesn't cost you fills — it changes which fills you get.** Sweeping
 re-quote latency from 0 to 10 ms degrades 10s markout monotonically on every
