@@ -227,3 +227,87 @@ which overrides ours, so the allocation counter never moves in an ASan build.
 The zero-allocation invariant cannot be verified there — the tests detect ASan
 and skip those assertions explicitly rather than passing vacuously. Invariants
 are gated in the normal build; ASan is for memory errors.
+
+---
+
+# Threaded tick-to-trade pipeline
+
+```
+feed thread     ──ring1──▶  strategy thread  ──ring2──▶  gateway thread
+walk the tape               book + market maker          consume fills
+```
+
+Both paths run the **same** `MarketMaker` code, so comparing them isolates the
+threading and nothing else. `./build/src/pipeline <SYM>.tape`.
+
+## Result 1 — the ring handoff preserves semantics exactly
+
+| symbol | single-threaded | pipelined | fill digests |
+|---|---:|---:|---|
+| AAPL | 9,535 fills | 9,535 fills | identical |
+| SPY | 12,058 fills | 12,058 fills | identical |
+| MSFT | 9,403 fills | 9,403 fills | identical |
+| INTC | 4,434 fills | 4,434 fills | identical |
+
+The fill stream is hashed with FNV-1a in order. Identical digests mean the
+lock-free handoff changed nothing about what the strategy did — which is the
+property you actually want from a pipeline, and the one that is easy to lose.
+
+## Result 2 — pipelining makes it *slower*, on every symbol
+
+| symbol | single-threaded (ns/event) | 3-stage pipeline | penalty |
+|---|---:|---:|---:|
+| AAPL | 89.68 ± 0.52 | 110.11 ± 1.42 | **1.23x slower** (+20.4) |
+| SPY | 56.45 ± 1.28 | 73.20 ± 1.23 | **1.30x slower** (+16.8) |
+| MSFT | 55.29 ± 1.37 | 74.61 ± 1.78 | **1.35x slower** (+19.3) |
+| INTC | 35.86 ± 1.18 | 54.62 ± 1.38 | **1.52x slower** (+18.8) |
+
+The penalty is **+17 to +20 ns/event on every symbol** — essentially constant,
+because it is the fixed cost of crossing the ring, not a function of the work.
+That matches the standalone ring measurement (~25 ns/message) once you account
+for the second ring being nearly idle.
+
+And the ratio behaves exactly as a fixed overhead should: **the cheaper the
+strategy stage, the worse pipelining looks.** INTC has the lightest per-event
+work (35.9 ns) and suffers the worst penalty (1.52x); AAPL has the heaviest
+(89.7 ns) and suffers the least (1.23x).
+
+## Result 3 — the ring occupancy says exactly why
+
+| ring | empty | <25% | <50% | <75% | ≥75% |
+|---|---:|---:|---:|---:|---:|
+| feed → strategy (AAPL) | 0.0% | 0.3% | 0.3% | 0.3% | **99.2%** |
+| strategy → gateway (AAPL) | **95.3%** | 4.7% | 0.0% | 0.0% | 0.0% |
+
+The first ring is full essentially always: the feed thread can produce events far
+faster than the strategy can consume them, so it spends its life blocked on a
+full ring. The second is empty essentially always: fills are rare (9,535 out of
+1.5M events), so the gateway is starved.
+
+**The stages are wildly unbalanced.** Parsing is cheap, the book plus
+queue-position bookkeeping is expensive, and order emission is nearly free.
+Splitting cheap work away from expensive work across a ring cannot help — you
+have added a synchronisation cost to a pipeline whose critical path did not get
+shorter.
+
+## What this actually means
+
+This is not an argument against pipelining in trading systems; it is a
+measurement of when it pays. A ring hop costs ~20 ns here. It is worth paying
+when it buys you something that costs more than 20 ns — isolating a thread that
+would otherwise be interrupted, crossing a NUMA or process boundary, decoupling
+a stage that can block. It is not worth paying to move 15 ns of book maintenance
+onto another core.
+
+The honest read of this repo's own numbers: **for this workload, on this
+machine, the single-threaded path is the right design**, and the ring earns its
+place as the mechanism for a boundary that has to exist for another reason — not
+as a throughput optimisation.
+
+One further observation from the same table: the strategy stage costs 36–90
+ns/event against 13–16 ns/event for book maintenance alone (see the design
+study above). The queue-position bookkeeping — walking a level's FIFO on every
+re-quote to record what is ahead of us — is 3–6x the cost of maintaining the
+book itself. Tracking it incrementally instead of re-walking is the obvious next
+optimisation, and would shrink the strategy stage toward the point where the
+pipeline penalty ratio gets *worse* still.

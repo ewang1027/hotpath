@@ -15,3 +15,6 @@ target_link_libraries(litmus_ring PRIVATE hotpath)
 
 add_executable(sim_mm sim_mm.cpp)
 target_link_libraries(sim_mm PRIVATE hotpath hotpath_instrument)
+
+add_executable(pipeline pipeline.cpp)
+target_link_libraries(pipeline PRIVATE hotpath hotpath_instrument)

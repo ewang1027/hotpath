@@ -133,6 +133,10 @@ public:
 
   [[nodiscard]] std::size_t order_count() const noexcept { return ids_.size(); }
   [[nodiscard]] std::uint64_t rejected() const noexcept { return rejected_; }
+  // Levels created outside the dense window (sub-penny, or beyond the price
+  // band). These go into a std::map and are the ONLY source of allocation in
+  // this design -- the dense path allocates nothing after construction.
+  [[nodiscard]] std::uint64_t overflow_levels() const noexcept { return overflow_ops_; }
 
   // --- queue position support (used by sim/) ---
   [[nodiscard]] const Order* find_order(OrderId ref) const noexcept {
