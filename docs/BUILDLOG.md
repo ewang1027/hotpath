@@ -253,16 +253,55 @@ showed up before.
 
 ---
 
+## Phase 8 — queue position in O(1)  [DONE]
+
+The strategy stage cost 3-6x book maintenance because re-quoting rebuilt an
+explicit set of the orders ahead by walking the level's FIFO. A price level is
+strict FIFO, so stamping each order with a monotonic insertion sequence turns
+"was this ahead of mine?" into one comparison against the stamp captured at
+join. **2.90x on AAPL** (104.50 -> 36.05 ns/event), 1.63-2.38x elsewhere,
+scaling with how often the touch moves.
+
+**Gate: PASS** -- fill output is bit-identical before and after on every symbol,
+so the stamp test is exactly equivalent to the membership set, not an
+approximation of it.
+
+Note the earlier rejected version of the same idea: `order_ref < my_join_ref`
+is O(1) too, but ITCH order refs are not monotonic (3.0% violations on AAPL) and
+it would have silently corrupted every queue position. The book's own insertion
+stamp is monotonic by construction.
+
+Knock-on: with the strategy ~2.5x cheaper, the threaded pipeline's absolute
+penalty stayed in the same band while every ratio got worse -- exactly what the
+fixed-hop-cost model predicted. Recorded in `PERFORMANCE.md` as a passed
+prediction rather than quietly re-measured.
+
+### Traps hit
+
+- **Struct layout cost more than the field did.** A 64-bit insertion stamp
+  placed after `side` pushed `HybridBook::Order` from 32 to 40 bytes through
+  padding and regressed pure book maintenance 10-35% (INTC 13.4 -> 17.5
+  ns/event) -- the order pool is the hot path's dominant working set. A 32-bit
+  stamp (~100x a full day of adds across the whole US tape) keeps it at 32
+  bytes; a `static_assert` pins it. Caught by the regression gate, not by
+  reading the code.
+- **The absolute-throughput gate was unsupportable and had to be redesigned.**
+  Across invocations the same binary on the same tape ranged 12.6-17.5 ns/event
+  on INTC, far wider than the within-process CI, so the gate flapped. It now
+  gates on the hybrid-vs-map *ratio* measured in the same process, which absorbs
+  the same noise on both sides: ratios reproduced within ~14% across runs where
+  absolutes swung 30%. This is the same claim class `METHODOLOGY.md` says this
+  hardware supports, so the gate and the docs now agree on what a number is
+  worth here.
+
+---
+
 ## Remaining / not attempted
 
 Stated as gaps in the README rather than hidden: no network path or kernel
 bypass (the pipeline is threads and shared memory, not sockets); no self-impact
 or re-quote latency in the fill model, so its fill counts are an upper bound;
 one trading day, four symbols.
-
-Known next optimisation, measured but not done: the queue-position bookkeeping
-costs 3-6x book maintenance because re-quoting re-walks the level's FIFO to
-record what is ahead. Tracking it incrementally would remove that.
 
 The highest-value next step is external to the code: run the finished binaries
 on bare-metal x86 Linux for an evening to get real p99/p99.9 tail distributions,

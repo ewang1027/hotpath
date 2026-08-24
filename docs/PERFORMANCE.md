@@ -27,10 +27,10 @@ byte-identical input, or an exact count.
 
 | symbol | events | map | intrusive | flat | hybrid |
 |---|---:|---:|---:|---:|---:|
-| AAPL | 1,512,179 | 53.4 (1.00x) | 55.4 (0.96x) | **15.0 (3.57x)** | 15.9 (3.36x) |
-| SPY | 2,132,141 | 37.2 (1.00x) | 28.8 (1.29x) | 14.7 (2.53x) | **14.6 (2.55x)** |
-| MSFT | 1,215,912 | 43.7 (1.00x) | 35.5 (1.23x) | **13.7 (3.20x)** | 14.6 (3.00x) |
-| INTC | 749,489 | 35.2 (1.00x) | 26.5 (1.32x) | **12.6 (2.80x)** | 12.9 (2.73x) |
+| AAPL | 1,512,179 | 53.8 (1.00x) | 55.5 (0.97x) | **15.5 (3.48x)** | 16.4 (3.28x) |
+| SPY | 2,132,141 | 35.8 (1.00x) | 28.0 (1.28x) | **15.0 (2.40x)** | 15.5 (2.32x) |
+| MSFT | 1,215,912 | 44.8 (1.00x) | 36.1 (1.24x) | **14.3 (3.14x)** | 16.1 (2.78x) |
+| INTC | 749,489 | 35.7 (1.00x) | 26.4 (1.35x) | **12.6 (2.82x)** | 13.2 (2.69x) |
 
 ### Replay + top-of-book query on every event
 
@@ -39,10 +39,10 @@ benchmark, and the designs differ more in read cost than in write cost.
 
 | symbol | map | intrusive | flat | hybrid |
 |---|---:|---:|---:|---:|
-| AAPL | 54.5 (1.00x) | 59.8 (0.91x) | 22.7 (2.40x) | **21.8 (2.50x)** |
-| SPY | 35.5 (1.00x) | 28.9 (1.23x) | 18.8 (1.89x) | **17.2 (2.06x)** |
-| MSFT | 44.0 (1.00x) | 36.1 (1.22x) | 18.9 (2.33x) | **17.6 (2.50x)** |
-| INTC | 35.1 (1.00x) | 27.5 (1.28x) | **16.5 (2.13x)** | 17.6 (2.00x) |
+| AAPL | 54.0 (1.00x) | 56.8 (0.95x) | 22.5 (2.40x) | **21.5 (2.51x)** |
+| SPY | 36.2 (1.00x) | 30.4 (1.19x) | 21.2 (1.71x) | **19.9 (1.82x)** |
+| MSFT | 44.8 (1.00x) | 37.0 (1.21x) | 19.0 (2.36x) | **18.6 (2.40x)** |
+| INTC | 36.3 (1.00x) | 28.0 (1.29x) | 16.9 (2.15x) | **16.8 (2.15x)** |
 
 ### Allocations during replay
 
@@ -109,10 +109,23 @@ resting at a level, and ITCH fills a level in strict time priority — so that
 FIFO order **is** queue position, which the fill model in Phase 4 depends on.
 
 The hybrid keeps the grid's addressing and restores the per-level intrusive
-FIFO over a pooled level store. It costs ~0–6% versus flat on maintenance, and
-is *faster* than flat on three of four symbols once the touch is queried every
-event (checking `slot[hint] >= 0` is a single load; the bitmap variant extracts
-a bit first). So the queue-position capability is effectively free.
+FIFO over a pooled level store. It costs ~3–13% versus flat on maintenance, and
+is *faster* than flat once the touch is queried every event on three of four
+symbols (checking `slot[hint] >= 0` is a single load; the bitmap variant
+extracts a bit first).
+
+Part of that maintenance gap is the monotonic insertion stamp each order
+carries — the thing that makes queue position O(1) (see below). It is one extra
+store on every add, and adds are 46% of the stream, so it is not free: it costs
+the book ~5–8% to save the strategy 2.9x. Worth stating rather than burying,
+since the flat design does not pay it and cannot answer the question it buys.
+
+The struct layout matters more than the field does. Placing a 64-bit stamp
+after `side` pushes `Order` from 32 to 40 bytes through padding, and that
+measured as a **10–35% regression** in pure book maintenance (INTC 13.4 → 17.5
+ns/event) — the order pool is the hot path's dominant working set. A 32-bit
+stamp holds ~100x a full day of adds across the entire US tape and keeps the
+struct at 32 bytes; a `static_assert` pins it there.
 
 ### 3. Why the dense grid must be a bounded window
 
@@ -148,6 +161,7 @@ they are zero.
 | intrusive: store price inline in level index (8B entries) | 56.1 | 66.0 | **reverted** — falsified the cache hypothesis; element size dominates because memmove does |
 | add hybrid design (grid addressing + intrusive FIFO) | 55.4 | 15.9 | kept — 3.36x, and retains queue position |
 | hybrid vs flat on top-of-book query (AAPL) | 22.7 | 21.8 | kept — slot load beats bit extraction |
+| queue position: FIFO walk → monotonic insertion stamp (AAPL, full strategy) | 104.50 | 36.05 | kept — **2.90x**, bit-identical output |
 
 ---
 
@@ -259,27 +273,45 @@ property you actually want from a pipeline, and the one that is easy to lose.
 
 | symbol | single-threaded (ns/event) | 3-stage pipeline | penalty |
 |---|---:|---:|---:|
-| AAPL | 89.68 ± 0.52 | 110.11 ± 1.42 | **1.23x slower** (+20.4) |
-| SPY | 56.45 ± 1.28 | 73.20 ± 1.23 | **1.30x slower** (+16.8) |
-| MSFT | 55.29 ± 1.37 | 74.61 ± 1.78 | **1.35x slower** (+19.3) |
-| INTC | 35.86 ± 1.18 | 54.62 ± 1.38 | **1.52x slower** (+18.8) |
+| AAPL | 42.90 ± 3.34 | 55.62 ± 2.98 | **1.30x slower** (+12.7) |
+| SPY | 30.47 ± 0.96 | 44.63 ± 1.20 | **1.46x slower** (+14.2) |
+| MSFT | 32.08 ± 0.80 | 47.23 ± 2.53 | **1.47x slower** (+15.2) |
+| INTC | 29.58 ± 2.20 | 47.94 ± 1.60 | **1.62x slower** (+18.4) |
 
-The penalty is **+17 to +20 ns/event on every symbol** — essentially constant,
+The penalty is **+13 to +18 ns/event on every symbol** — essentially constant,
 because it is the fixed cost of crossing the ring, not a function of the work.
 That matches the standalone ring measurement (~25 ns/message) once you account
 for the second ring being nearly idle.
 
 And the ratio behaves exactly as a fixed overhead should: **the cheaper the
 strategy stage, the worse pipelining looks.** INTC has the lightest per-event
-work (35.9 ns) and suffers the worst penalty (1.52x); AAPL has the heaviest
-(89.7 ns) and suffers the least (1.23x).
+work (29.6 ns) and suffers the worst penalty (1.62x); AAPL has the heaviest
+(42.9 ns) and suffers the least (1.30x).
+
+### The model made a prediction, and it held
+
+This table was first measured before the queue-position optimisation below,
+when the strategy stage cost 36–90 ns/event. If the penalty really is a fixed
+hop cost, then making the strategy ~2.5x cheaper should leave the absolute
+penalty alone and make every *ratio* worse. It did:
+
+| symbol | penalty before (strategy 36–90 ns) | penalty after (strategy 30–43 ns) |
+|---|---:|---:|
+| AAPL | 1.23x (+20.4 ns) | 1.30x (+12.7 ns) |
+| SPY | 1.30x (+16.8 ns) | 1.46x (+14.2 ns) |
+| MSFT | 1.35x (+19.3 ns) | 1.47x (+15.2 ns) |
+| INTC | 1.52x (+18.8 ns) | 1.62x (+18.4 ns) |
+
+Every ratio degraded while the absolute cost stayed in the same band. Faster
+work does not make synchronisation cheaper — it makes it a larger share of what
+is left.
 
 ## Result 3 — the ring occupancy says exactly why
 
 | ring | empty | <25% | <50% | <75% | ≥75% |
 |---|---:|---:|---:|---:|---:|
 | feed → strategy (AAPL) | 0.0% | 0.3% | 0.3% | 0.3% | **99.2%** |
-| strategy → gateway (AAPL) | **95.3%** | 4.7% | 0.0% | 0.0% | 0.0% |
+| strategy → gateway (AAPL) | **94.6%** | 5.4% | 0.0% | 0.0% | 0.0% |
 
 The first ring is full essentially always: the feed thread can produce events far
 faster than the strategy can consume them, so it spends its life blocked on a
@@ -306,10 +338,35 @@ machine, the single-threaded path is the right design**, and the ring earns its
 place as the mechanism for a boundary that has to exist for another reason — not
 as a throughput optimisation.
 
-One further observation from the same table: the strategy stage costs 36–90
-ns/event against 13–16 ns/event for book maintenance alone (see the design
-study above). The queue-position bookkeeping — walking a level's FIFO on every
-re-quote to record what is ahead of us — is 3–6x the cost of maintaining the
-book itself. Tracking it incrementally instead of re-walking is the obvious next
-optimisation, and would shrink the strategy stage toward the point where the
-pipeline penalty ratio gets *worse* still.
+## Queue position in O(1)
+
+The strategy stage originally cost 36–90 ns/event against 13–16 ns for book
+maintenance alone — the queue-position bookkeeping was 3–6x the cost of the book
+it sat on. The reason was that re-quoting rebuilt an explicit set of the orders
+ahead of us by walking the level's FIFO, and levels at the touch are not short.
+
+It does not need a set at all. A price level's order list is strict FIFO, so
+stamping each order with a monotonic insertion sequence makes *"was this order
+ahead of mine?"* a single comparison against the stamp captured when we joined.
+Everything already resting there is below it; everything arriving later is above.
+
+| symbol | before (ns/event) | after | speedup |
+|---|---:|---:|---:|
+| AAPL | 104.50 | **36.05** | **2.90x** |
+| SPY | 73.57 | **30.89** | **2.38x** |
+| MSFT | 71.07 | **30.31** | **2.34x** |
+| INTC | 49.72 | **30.41** | **1.63x** |
+
+The speedup tracks how often the touch moves — AAPL re-quotes on 10.2% of
+events, INTC on 1.4% — because that is how often the walk used to happen.
+
+Fill output is **bit-identical** before and after on every symbol (9,535 fills
+and 548,567 shares on AAPL, with matching queue-depth buckets), which is the
+point: the stamp comparison is not an approximation of the membership set, it is
+exactly equivalent to it.
+
+Note what this did *not* work: an earlier attempt used `order_ref <
+my_join_ref` as the same O(1) test. ITCH order reference numbers are not
+monotonic — 21,094 non-monotonic adds on AAPL in one day, 3.0% of adds — so it
+would have silently corrupted queue position. The book's own insertion stamp is
+monotonic by construction.

@@ -5,22 +5,31 @@
 #   - the full-day parse gate (framing + referential integrity + invariants)
 #   - four-way book cross-validation on every tape
 #   - zero allocations in the pooled book designs
-#   - throughput within a tolerance of the recorded baseline
+#   - the hybrid book's SPEEDUP over the std::map baseline
 #
-# Throughput thresholds are deliberately loose (default 25%): this machine is a
-# laptop running a desktop, and a tighter bound would fail on scheduling noise
-# rather than on a real regression.
+# Note what is gated and what is not. An absolute ns/event bound is not
+# supportable here: across invocations the same binary on the same tape has
+# ranged 12.6-17.5 ns/event on INTC, far wider than the within-process
+# confidence interval, because this is a laptop running a desktop. Gating on it
+# produces a flapping build, not a signal.
+#
+# The RATIO between two designs measured in the same process is stable, because
+# both sides absorb the same thermal and scheduling noise. That is also exactly
+# the class of claim docs/METHODOLOGY.md says this hardware supports, so the
+# gate and the documentation agree on what a number here is worth.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TAPE_DIR="${HOTPATH_TAPE_DIR:-$HOME/market-data/tapes}"
 DATA_DIR="${HOTPATH_DATA_DIR:-$HOME/market-data/itch}"
 DAY="${1:-12302019}"
-TOLERANCE="${TOLERANCE:-25}"
 
-# Baseline ns/event for the hybrid design, replay-only (docs/PERFORMANCE.md).
+
+# Minimum acceptable speedup of the hybrid book over the std::map baseline,
+# replay-only. Recorded values are 3.28 / 2.32 / 2.78 / 2.69 (docs/PERFORMANCE.md),
+# so a floor of 2.0 leaves real margin while still catching a design regression.
 declare -a BASE_SYM=(AAPL SPY MSFT INTC)
-declare -a BASE_NS=(15.9 14.6 14.6 12.9)
+MIN_SPEEDUP="${MIN_SPEEDUP:-2.0}"
 
 fail=0
 note() { printf '%-46s %s\n' "$1" "$2"; }
@@ -43,15 +52,13 @@ for s in "${BASE_SYM[@]}"; do
   fi
 done
 
-echo; echo "=== throughput regression (hybrid, replay-only, +/-${TOLERANCE}%) ==="
-for i in "${!BASE_SYM[@]}"; do
-  s="${BASE_SYM[$i]}"; base="${BASE_NS[$i]}"
-  got=$(./build/bench/bench_book "$TAPE_DIR/$s.tape" --trials 5 \
-        | awk '/^  hybrid/{print $2; exit}')
-  [[ -n "$got" ]] || { note "throughput $s" "FAIL (no reading)"; fail=1; continue; }
-  verdict=$(awk -v g="$got" -v b="$base" -v t="$TOLERANCE" \
-    'BEGIN{ lim=b*(1+t/100); printf (g<=lim ? "PASS" : "FAIL"); }')
-  note "throughput $s  ${got} ns/event (base ${base})" "$verdict"
+echo; echo "=== book design regression (hybrid vs std::map, floor ${MIN_SPEEDUP}x) ==="
+for s in "${BASE_SYM[@]}"; do
+  read -r ns speedup < <(./build/bench/bench_book "$TAPE_DIR/$s.tape" --trials 5 \
+      | awk '/^  hybrid/{gsub("x","",$7); print $2, $7; exit}')
+  [[ -n "$speedup" ]] || { note "design $s" "FAIL (no reading)"; fail=1; continue; }
+  verdict=$(awk -v g="$speedup" -v m="$MIN_SPEEDUP" 'BEGIN{ printf (g>=m ? "PASS" : "FAIL"); }')
+  note "design $s  ${speedup}x over map  (${ns} ns/event)" "$verdict"
   [[ "$verdict" == PASS ]] || fail=1
 done
 

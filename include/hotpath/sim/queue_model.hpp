@@ -1,5 +1,4 @@
 #pragma once
-#include "hotpath/core/open_hash.hpp"
 #include "hotpath/core/types.hpp"
 
 #include <cstdint>
@@ -24,42 +23,39 @@ namespace hotpath::sim {
 // that fills whenever the price trades will conclude you always do. Both are
 // wrong in opposite directions.
 //
-// Membership ("was that order ahead of me?") is tracked explicitly rather than
-// inferred from the order reference number. ITCH order refs are NOT
-// monotonically increasing -- measured 21,094 non-monotonic adds on AAPL in one
-// day (3.0% of adds) -- so `ref < my_join_ref` is not a valid proxy.
+// Membership ("was that order ahead of me?") is decided by comparing the
+// order's monotonic insertion stamp against the stamp at the moment we joined.
+// A price level's order list is strict FIFO, so everything resting in it when
+// we arrived has a strictly smaller stamp, and everything that arrives later
+// has a larger one. That makes the test O(1) with no state.
+//
+// Two earlier approaches were rejected:
+//   * `order_ref < my_join_ref` -- ITCH order reference numbers are NOT
+//     monotonically increasing (21,094 non-monotonic adds on AAPL in one day,
+//     3.0% of adds), so this silently corrupts queue position.
+//   * an explicit hash set of the orders ahead -- exact, but it had to be
+//     rebuilt by walking the level's FIFO on every re-quote, which measured as
+//     3-6x the cost of maintaining the book itself.
 class QueuePosition {
 public:
-  explicit QueuePosition(std::size_t ahead_capacity_pow2 = 1u << 12)
-      : ahead_orders_(ahead_capacity_pow2) {}
-
-  // Join the back of the queue at a level currently holding `resting` shares
-  // across the given order refs.
-  void join(Qty resting) noexcept {
+  // Join the back of a level currently holding `resting` shares. `join_seq` is
+  // the book's next insertion stamp: everything already at the level is below it.
+  void join(Qty resting, std::uint32_t join_seq) noexcept {
     ahead_ = resting;
-    ahead_orders_.clear();
+    join_seq_ = join_seq;
     joined_ = true;
   }
 
-  // Record one order that is ahead of us (called for each order resting at the
-  // level at join time).
-  void note_ahead(OrderId ref, Qty qty) noexcept {
-    if (qty) ahead_orders_.insert(ref, qty);
-  }
-
-  void leave() noexcept { joined_ = false; ahead_ = 0; ahead_orders_.clear(); }
+  void leave() noexcept { joined_ = false; ahead_ = 0; }
   [[nodiscard]] bool joined() const noexcept { return joined_; }
   [[nodiscard]] Qty ahead() const noexcept { return ahead_; }
+
+  [[nodiscard]] bool is_ahead(std::uint32_t seq) const noexcept { return seq < join_seq_; }
 
   // An execution happened at our price level. Returns how many shares of OURS
   // were filled: the exchange consumes the queue from the front, so we are only
   // reached once cumulative executed volume exceeds the volume ahead of us.
-  [[nodiscard]] Qty on_execution(OrderId ref, Qty executed, Qty our_remaining) noexcept {
-    if (Qty* q = ahead_orders_.find(ref)) {
-      const Qty d = executed < *q ? executed : *q;
-      *q -= d;
-      if (*q == 0) ahead_orders_.erase(ref);
-    }
+  [[nodiscard]] Qty on_execution(Qty executed, Qty our_remaining) noexcept {
     if (executed <= ahead_) { ahead_ -= executed; return 0; }
     const Qty through = executed - ahead_;
     ahead_ = 0;
@@ -68,27 +64,21 @@ public:
 
   // An order ahead of us was cancelled (partially) -- the queue shortens with
   // no trade. This is the path a naive fill model ignores entirely.
-  void on_cancel(OrderId ref, Qty cancelled) noexcept {
-    Qty* q = ahead_orders_.find(ref);
-    if (!q) return;                       // behind us: no effect on our position
-    const Qty d = cancelled < *q ? cancelled : *q;
-    *q -= d;
-    ahead_ -= d < ahead_ ? d : ahead_;
-    if (*q == 0) ahead_orders_.erase(ref);
+  void on_cancel(std::uint32_t seq, Qty cancelled) noexcept {
+    if (!is_ahead(seq)) return;                 // behind us: no effect
+    ahead_ -= cancelled < ahead_ ? cancelled : ahead_;
   }
 
-  // An order ahead of us was deleted outright.
-  void on_delete(OrderId ref) noexcept {
-    Qty* q = ahead_orders_.find(ref);
-    if (!q) return;
-    ahead_ -= *q < ahead_ ? *q : ahead_;
-    ahead_orders_.erase(ref);
+  // An order ahead of us was deleted outright; `remaining` is what it still had.
+  void on_delete(std::uint32_t seq, Qty remaining) noexcept {
+    if (!is_ahead(seq)) return;
+    ahead_ -= remaining < ahead_ ? remaining : ahead_;
   }
 
 private:
-  OpenHashMap<Qty> ahead_orders_;
-  Qty  ahead_{0};
-  bool joined_{false};
+  Qty           ahead_{0};
+  std::uint32_t join_seq_{0};
+  bool          joined_{false};
 };
 
 } // namespace hotpath::sim

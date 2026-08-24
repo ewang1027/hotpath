@@ -72,12 +72,16 @@ public:
     bool have_pre = false;
     Side pre_side = Side::Buy;
     Price pre_px = 0;
+    std::uint32_t pre_seq = 0;
+    Qty pre_qty = 0;
     if (e.type != EventType::Add) {
       if (const auto* o = book_.find_order(e.order_ref)) {
         if (o->level >= 0) {
           have_pre = true;
           pre_side = o->side;
           pre_px = book_.level_by_index(o->level).price;
+          pre_seq = o->seq;
+          pre_qty = o->qty;
         }
       }
     }
@@ -87,8 +91,8 @@ public:
     // Fills are resolved against the quote that was actually resting when the
     // event happened -- before any in-flight replacement lands.
     if (have_pre) {
-      step_side(bid_, pos_bid_, Side::Buy, pre_side, pre_px, e, cb);
-      step_side(ask_, pos_ask_, Side::Sell, pre_side, pre_px, e, cb);
+      step_side(bid_, pos_bid_, Side::Buy, pre_side, pre_px, pre_seq, pre_qty, e, cb);
+      step_side(ask_, pos_ask_, Side::Sell, pre_side, pre_px, pre_seq, pre_qty, e, cb);
     }
 
     const Price bb = book_.best_bid();
@@ -133,7 +137,7 @@ private:
 
   template <typename OnFill>
   void step_side(Quote& q, QueuePosition& pos, Side side, Side pre_side, Price pre_px,
-                 const BookEvent& e, OnFill& cb) {
+                 std::uint32_t pre_seq, Qty pre_qty, const BookEvent& e, OnFill& cb) {
     if (!q.active || pre_side != side) return;
 
     if (e.type == EventType::Execute && strictly_better(side, q.px, pre_px)) {
@@ -149,7 +153,7 @@ private:
     if (pre_px != q.px) return;
     switch (e.type) {
       case EventType::Execute: {
-        const Qty f = pos.on_execution(e.order_ref, e.shares, q.remaining);
+        const Qty f = pos.on_execution(e.shares, q.remaining);
         if (f) {
           cb(Fill{e.ts, q.px, f, side, q.ahead_at_join, q.in_flight, false});
           q.remaining -= f;
@@ -157,9 +161,11 @@ private:
         }
         break;
       }
-      case EventType::Cancel:  pos.on_cancel(e.order_ref, e.shares); break;
-      case EventType::Delete:  pos.on_delete(e.order_ref); break;
-      case EventType::Replace: pos.on_delete(e.order_ref); break;
+      case EventType::Cancel:  pos.on_cancel(pre_seq, e.shares); break;
+      // A replace deletes the original outright, so both remove the order's
+      // full remaining size from the queue ahead of us.
+      case EventType::Delete:
+      case EventType::Replace: pos.on_delete(pre_seq, pre_qty); break;
       default: break;
     }
   }
@@ -186,11 +192,9 @@ private:
     // arrived while we were in flight is now ahead of us.
     const auto* L = book_.level_for(side, target);
     const Qty resting = L ? L->qty : 0;
-    pos.join(resting);
-    if (L) {
-      for (std::int32_t oi = L->head; oi >= 0; oi = book_.order_at(oi).next)
-        pos.note_ahead(book_.order_at(oi).id, book_.order_at(oi).qty);
-    }
+    // O(1): capture the book's next insertion stamp instead of enumerating the
+    // orders ahead. Everything already resting here is below it by FIFO.
+    pos.join(resting, book_.next_seq());
     q.active = true; q.px = target; q.remaining = quote_size_; q.ahead_at_join = resting;
     ++requotes_;
   }

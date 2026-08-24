@@ -44,8 +44,10 @@ generally. [Details](docs/ADVERSE-SELECTION.md#result-4--what-re-quote-latency-a
 
 **Pipelining the tick-to-trade path across lock-free rings makes it slower.**
 Splitting feed / book+strategy / gateway across three threads costs a
-near-constant +17 to +20 ns/event on every symbol — the ring hop itself — for a
-1.23x to 1.52x slowdown. Ring occupancy says why without guesswork: the first
+near-constant +13 to +18 ns/event on every symbol — the ring hop itself — for a
+1.30x to 1.62x slowdown. That model then made a prediction and passed it: after
+a later optimisation made the strategy stage ~2.5x cheaper, the absolute penalty
+stayed put and every ratio got *worse*. Ring occupancy says why without guesswork: the first
 ring is ≥75% full 99.2% of the time and the second is empty 95.3% of it, so the
 stages are wildly unbalanced. The fill streams hash identically to the
 single-threaded path, so the handoff is correct; it just does not pay here.

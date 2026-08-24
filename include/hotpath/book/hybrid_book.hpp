@@ -31,13 +31,24 @@ public:
   static constexpr const char* kName = "hybrid";
   static constexpr Price kTick = 100;
 
+  // Field order matters: this struct is the pool's element and the hot path
+  // touches one per event. Laid out to stay at 32 bytes -- a 64-bit seq placed
+  // after `side` pushes it to 40 through padding, which measured as a 10-35%
+  // regression in pure book maintenance.
   struct Order {
-    OrderId      id{0};
-    Qty          qty{0};
-    std::int32_t prev{-1};
-    std::int32_t next{-1};
-    std::int32_t level{-1};
-    Side         side{Side::Buy};
+    OrderId       id{0};       // 8
+    // Monotonic insertion stamp. Because a level's list is strict FIFO, an
+    // order resting in it necessarily has a lower seq than anything inserted
+    // later -- so "was this order ahead of mine?" is a single comparison
+    // against the seq at the moment I joined, with no membership set and no
+    // walking the list. 32 bits is ~4.3e9 adds: about 100x a full day of adds
+    // across the entire US equity tape, and this book is per-symbol.
+    std::uint32_t seq{0};      // 4
+    Qty           qty{0};      // 4
+    std::int32_t  prev{-1};    // 4
+    std::int32_t  next{-1};    // 4
+    std::int32_t  level{-1};   // 4
+    Side          side{Side::Buy};  // 1 (+3 pad)
   };
   struct Level {
     Price         price{0};
@@ -74,7 +85,7 @@ public:
     const std::int32_t oi = free_orders_.back();
     free_orders_.pop_back();
     Order& o = orders_[static_cast<std::size_t>(oi)];
-    o.id = ref; o.qty = qty; o.level = li; o.side = side;
+    o.id = ref; o.qty = qty; o.level = li; o.side = side; o.seq = next_seq_++;
 
     Level& L = levels_[static_cast<std::size_t>(li)];
     o.prev = L.tail; o.next = -1;
@@ -137,6 +148,9 @@ public:
   // band). These go into a std::map and are the ONLY source of allocation in
   // this design -- the dense path allocates nothing after construction.
   [[nodiscard]] std::uint64_t overflow_levels() const noexcept { return overflow_ops_; }
+  // The stamp the next inserted order will receive. Captured when joining a
+  // level: everything already resting there has a strictly smaller seq.
+  [[nodiscard]] std::uint32_t next_seq() const noexcept { return next_seq_; }
 
   // --- queue position support (used by sim/) ---
   [[nodiscard]] const Order* find_order(OrderId ref) const noexcept {
@@ -349,6 +363,11 @@ private:
   OpenHashMap<std::int32_t> ids_;
   std::uint64_t rejected_{0};
   std::uint64_t overflow_ops_{0};
+  std::uint32_t next_seq_{1};
 };
+
+static_assert(sizeof(HybridBook::Order) == 32,
+              "HybridBook::Order grew past 32 bytes; the order pool is the hot "
+              "path's dominant working set and this costs real throughput");
 
 } // namespace hotpath::book

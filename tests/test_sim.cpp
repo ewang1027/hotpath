@@ -5,34 +5,34 @@
 using namespace hotpath;
 using namespace hotpath::sim;
 
+// Orders resting at a level when we join carry insertion stamps below the one
+// we capture; anything arriving later carries a higher stamp. These tests use
+// seq 1..9 for "already there" and 100+ for "arrived after us".
+constexpr std::uint32_t kJoin = 10;
+
 TEST_CASE("queue: executions ahead of us do not fill us", "[sim][queue]") {
   QueuePosition q;
-  q.join(500);
-  q.note_ahead(1, 200);
-  q.note_ahead(2, 300);
-
-  REQUIRE(q.on_execution(1, 200, 100) == 0);   // consumed order 1
+  q.join(500, kJoin);
+  REQUIRE(q.on_execution(200, 100) == 0);
   REQUIRE(q.ahead() == 300);
-  REQUIRE(q.on_execution(2, 250, 100) == 0);   // partially consumed order 2
+  REQUIRE(q.on_execution(250, 100) == 0);
   REQUIRE(q.ahead() == 50);
 }
 
 TEST_CASE("queue: we fill only once volume ahead is exhausted", "[sim][queue]") {
   QueuePosition q;
-  q.join(100);
-  q.note_ahead(1, 100);
-
+  q.join(100, kJoin);
   // 150 trades: 100 clears the queue, the remaining 50 reaches us.
-  REQUIRE(q.on_execution(1, 150, 100) == 50);
+  REQUIRE(q.on_execution(150, 100) == 50);
   REQUIRE(q.ahead() == 0);
-  // Now we are at the front: the next execution fills us up to our remaining size.
-  REQUIRE(q.on_execution(9, 30, 50) == 30);
+  // Now at the front: the next execution fills us up to our remaining size.
+  REQUIRE(q.on_execution(30, 50) == 30);
 }
 
 TEST_CASE("queue: a fill is capped at our own remaining size", "[sim][queue]") {
   QueuePosition q;
-  q.join(0);
-  REQUIRE(q.on_execution(1, 10'000, 100) == 100);   // not 10000
+  q.join(0, kJoin);
+  REQUIRE(q.on_execution(10'000, 100) == 100);   // not 10000
 }
 
 // The behaviour that separates this from a naive model: the queue shortens
@@ -41,45 +41,51 @@ TEST_CASE("queue: a fill is capped at our own remaining size", "[sim][queue]") {
 // ahead of you disappears this way.
 TEST_CASE("queue: cancels ahead of us advance our position", "[sim][queue]") {
   QueuePosition q;
-  q.join(500);
-  q.note_ahead(1, 200);
-  q.note_ahead(2, 300);
-
-  q.on_cancel(1, 150);
+  q.join(500, kJoin);
+  q.on_cancel(/*seq=*/1, 150);
   REQUIRE(q.ahead() == 350);
-  q.on_delete(2);
+  q.on_delete(/*seq=*/2, 300);
   REQUIRE(q.ahead() == 50);
-  q.on_delete(1);                  // remaining 50 of order 1
+  q.on_delete(/*seq=*/1, 50);
   REQUIRE(q.ahead() == 0);
 }
 
 TEST_CASE("queue: cancels BEHIND us do not advance our position", "[sim][queue]") {
   QueuePosition q;
-  q.join(300);
-  q.note_ahead(1, 300);
-  // Order 7 arrived after we joined, so it was never noted as ahead.
-  q.on_cancel(7, 250);
+  q.join(300, kJoin);
+  // seq 100 > kJoin: this order arrived after we did, so it is behind us and
+  // its disappearance does nothing for our position.
+  q.on_cancel(100, 250);
   REQUIRE(q.ahead() == 300);
-  q.on_delete(7);
+  q.on_delete(100, 250);
   REQUIRE(q.ahead() == 300);
+}
+
+TEST_CASE("queue: the ahead/behind boundary is exact", "[sim][queue]") {
+  QueuePosition q;
+  q.join(100, kJoin);
+  REQUIRE(q.is_ahead(kJoin - 1));     // resting when we arrived
+  REQUIRE_FALSE(q.is_ahead(kJoin));   // the stamp OUR order would have taken
+  REQUIRE_FALSE(q.is_ahead(kJoin + 1));
 }
 
 TEST_CASE("queue: over-cancel cannot underflow the position", "[sim][queue]") {
   QueuePosition q;
-  q.join(100);
-  q.note_ahead(1, 100);
+  q.join(100, kJoin);
   q.on_cancel(1, 5000);            // more than was there
   REQUIRE(q.ahead() == 0);
 }
 
 TEST_CASE("queue: re-joining resets us to the back", "[sim][queue]") {
   QueuePosition q;
-  q.join(100);
-  q.note_ahead(1, 100);
-  q.on_execution(1, 100, 100);
+  q.join(100, kJoin);
+  q.on_execution(100, 100);
   REQUIRE(q.ahead() == 0);
 
-  q.join(800);                     // touch moved; we re-quoted
+  q.join(800, 200);                // touch moved; we re-quoted
   REQUIRE(q.ahead() == 800);
-  REQUIRE(q.on_execution(2, 700, 100) == 0);
+  REQUIRE(q.on_execution(700, 100) == 0);
+  // An order that was ahead of our OLD join is behind our new one.
+  REQUIRE(q.is_ahead(150));
+  REQUIRE_FALSE(q.is_ahead(250));
 }
