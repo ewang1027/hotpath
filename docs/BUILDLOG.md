@@ -100,7 +100,7 @@ keeps the time-priority ordering the fill model needs.
   *worse* and falsified the cache hypothesis. Recorded as a negative result
   rather than quietly reverted.
 - The dense grid cannot span the observed price range: resting orders go from
-  \$0.0001 to \$199,999, which is 8 GB/side. It is a bounded window plus a
+  $0.0001 to $199,999, which is 8 GB/side. It is a bounded window plus a
   `std::map` overflow, and the cross-validation deliberately exercises the
   overflow path.
 
@@ -130,7 +130,32 @@ generalised to x86.
 
 ---
 
-## Phase 4 — queue position, fill model, adverse selection  [NEXT]
+## Phase 4 — queue position, fill model, adverse selection  [DONE]
 
-The differentiator. `HybridBook` already maintains per-level FIFO order, which
-is the queue position the fill model needs.
+**Gate: PASS.** Markouts are negative on average (adverse selection present, as
+expected and reported honestly), and fill rate varies with queue position.
+Full results in `ADVERSE-SELECTION.md`.
+
+Headlines: the naive fill model overstates passive volume by 3.7-6.4x; 10s
+markouts are negative almost everywhere; markout degrades ~4x with queue depth
+on AAPL; SPY shows an order of magnitude less adverse selection than the single
+names, which is the expected result for a broad-index ETF recovered from data.
+
+### Traps hit
+
+- **ITCH order reference numbers are NOT monotonically increasing.** Measured
+  21,094 non-monotonic adds on AAPL in one day (3.0%). The cheap `ref < join_ref`
+  test for "was this order ahead of me" is therefore invalid, and using it would
+  have silently corrupted every queue position. Membership is tracked explicitly
+  instead. Checked before relying on it, not after.
+- Events must be resolved against the book **before** `apply()`: ITCH's
+  execute/cancel/delete carry only an order reference, so after the mutation the
+  side and price needed to attribute a fill are gone.
+
+---
+
+## Remaining
+
+- Phase 5: CI, plots, and the regression gate.
+- Not attempted, and stated as gaps in the README: network path, kernel bypass,
+  self-impact in the fill model, more than one trading day.

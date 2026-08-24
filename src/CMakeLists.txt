@@ -12,3 +12,6 @@ target_link_libraries(book_crossval PRIVATE hotpath hotpath_instrument)
 
 add_executable(litmus_ring litmus_ring.cpp)
 target_link_libraries(litmus_ring PRIVATE hotpath)
+
+add_executable(sim_mm sim_mm.cpp)
+target_link_libraries(sim_mm PRIVATE hotpath hotpath_instrument)

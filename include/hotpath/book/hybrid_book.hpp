@@ -146,6 +146,9 @@ public:
   [[nodiscard]] const Order& order_at(std::int32_t i) const noexcept {
     return orders_[static_cast<std::size_t>(i)];
   }
+  [[nodiscard]] const Level& level_by_index(std::int32_t i) const noexcept {
+    return levels_[static_cast<std::size_t>(i)];
+  }
   // Shares resting ahead of `ref` at its own price level, i.e. its queue
   // position. Walks the FIFO from the head, so it is O(orders ahead) -- callers
   // that need it per-event should track it incrementally instead.
