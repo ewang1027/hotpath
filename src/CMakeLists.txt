@@ -9,3 +9,6 @@ target_link_libraries(extract_tape PRIVATE hotpath hotpath_instrument)
 
 add_executable(book_crossval book_crossval.cpp)
 target_link_libraries(book_crossval PRIVATE hotpath hotpath_instrument)
+
+add_executable(litmus_ring litmus_ring.cpp)
+target_link_libraries(litmus_ring PRIVATE hotpath)

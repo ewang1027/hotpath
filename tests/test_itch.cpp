@@ -147,6 +147,11 @@ TEST_CASE("itch: unknown message type is skipped via the length prefix", "[itch]
 }
 
 TEST_CASE("itch: the parse loop allocates nothing", "[itch][invariant]") {
+  if (bench::asan_active()) {
+    SUCCEED("skipped: ASan owns operator new, so the allocation counter cannot "
+            "observe anything. Run this gate in the normal build.");
+    return;
+  }
   REQUIRE(bench::alloc_counting_active());
   REQUIRE(bench::syscall_counting_active());
 
@@ -177,6 +182,11 @@ TEST_CASE("itch: the parse loop allocates nothing", "[itch][invariant]") {
 // link, a dropped dylib, a dead-stripped __interpose section -- every
 // zero-allocation assertion in this suite would start passing vacuously.
 TEST_CASE("instrumentation actually counts", "[invariant]") {
+  if (bench::asan_active()) {
+    SUCCEED("skipped under ASan: it replaces operator new, so our counter is "
+            "not the one being called.");
+    return;
+  }
   REQUIRE(bench::alloc_counting_active());
   REQUIRE(bench::syscall_counting_active());
 

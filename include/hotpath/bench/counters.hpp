@@ -4,7 +4,30 @@
 #include <new>
 #include <unistd.h>
 
+// AddressSanitizer replaces global operator new/delete with its own, which
+// overrides ours -- so in an ASan build the allocation counter never moves and
+// the zero-allocation invariant cannot be checked at all. That is not a bug to
+// work around, it is a property of the build: run the invariant gates in the
+// normal build, and ASan for memory errors. Tests use this to skip rather than
+// fail (or, far worse, pass vacuously).
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+#    define HOTPATH_ASAN_ACTIVE 1
+#  endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) && !defined(HOTPATH_ASAN_ACTIVE)
+#  define HOTPATH_ASAN_ACTIVE 1
+#endif
+
 namespace hotpath::bench {
+
+[[nodiscard]] inline constexpr bool asan_active() noexcept {
+#ifdef HOTPATH_ASAN_ACTIVE
+  return true;
+#else
+  return false;
+#endif
+}
 
 // ---------------------------------------------------------------------------
 // Provable invariants.

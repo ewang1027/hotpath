@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <stdlib.h>
 #include <new>
 
 #include <fcntl.h>
@@ -59,8 +60,14 @@ void operator delete[](void* p, const std::nothrow_t&) noexcept { ::operator del
 // through a path the counter never sees.
 void* operator new(std::size_t n, std::align_val_t a) {
   bump_alloc(n);
-  if (void* p = std::aligned_alloc(static_cast<std::size_t>(a), n)) return p;
-  throw std::bad_alloc();
+  // NOT std::aligned_alloc: it requires the size to be a multiple of the
+  // alignment, but C++17's aligned operator new must accept any size. A
+  // 16-byte allocation at 128-byte alignment -- e.g. a small cache-line-padded
+  // ring -- makes aligned_alloc return null and turns into a spurious
+  // bad_alloc. posix_memalign has no such restriction.
+  void* p = nullptr;
+  if (::posix_memalign(&p, static_cast<std::size_t>(a), n ? n : 1) != 0) throw std::bad_alloc();
+  return p;
 }
 void* operator new[](std::size_t n, std::align_val_t a) { return ::operator new(n, a); }
 void operator delete(void* p, std::align_val_t) noexcept { if (p) bump_free(); std::free(p); }

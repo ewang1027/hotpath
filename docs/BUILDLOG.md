@@ -77,7 +77,60 @@ full-day peak is known.
 
 ---
 
-## Phase 2 — order book, three designs  [NEXT]
+## Phase 2 — order book designs  [DONE]
 
-Three implementations behind one interface, cross-validated bit-identically on a
-full trading day. See the plan for the design list.
+Four implementations, cross-validated bit-identically on a full trading day.
+**Gate: PASS** — zero divergences over 5,609,721 events across AAPL/SPY/MSFT/
+INTC, all four draining to exactly zero resting orders at the close. Full study
+in `PERFORMANCE.md`.
+
+Headline: the textbook intrusive book is the *slowest* design on AAPL, losing
+even to `std::map`, because real books are ~4650 levels deep and its sorted
+level vector memmoves 5.7 GB per replay. The hybrid design (grid addressing +
+per-level intrusive FIFO) that the measurements implied is 3.3x the baseline and
+keeps the time-priority ordering the fill model needs.
+
+### Traps hit
+
+- A randomised differential test caught the intrusive book **silently dropping
+  orders** when its level pool filled: `find_or_create_level` returned -1 and
+  `add()` just returned. Both bounded designs now count rejections and every
+  gate asserts zero.
+- The first "optimisation" (price inline in the level index) made things
+  *worse* and falsified the cache hypothesis. Recorded as a negative result
+  rather than quietly reverted.
+- The dense grid cannot span the observed price range: resting orders go from
+  \$0.0001 to \$199,999, which is 8 GB/side. It is a bounded window plus a
+  `std::map` overflow, and the cross-validation deliberately exercises the
+  overflow path.
+
+---
+
+## Phase 3 — SPSC ring, memory ordering, false sharing  [DONE]
+
+**Gate: PASS.** The `relaxed` variant reproducibly violates its invariant on
+arm64 (1,463 zero slots + 544 torn reads per 10.5M messages); the
+release/acquire variant is clean and TSan-clean over a 2M-message threaded
+stress run.
+
+Findings in `PERFORMANCE.md`: index caching is worth 2.63x; padding is *not*
+measurable on this machine and the shared-line layout is slightly faster — an
+honest negative result with an Apple-Silicon-specific mechanism, explicitly not
+generalised to x86.
+
+### Traps hit
+
+- **`std::aligned_alloc` requires size to be a multiple of the alignment**, but
+  C++17's aligned `operator new` must accept any size. A 16-byte allocation at
+  128-byte alignment -- i.e. any small cache-line-padded object -- threw a
+  spurious `bad_alloc`. Switched to `posix_memalign`; regression test pinned.
+- **ASan replaces `operator new`**, so the allocation counter is dead in an ASan
+  build and every zero-allocation assertion would pass vacuously. Tests now
+  detect ASan and skip those explicitly.
+
+---
+
+## Phase 4 — queue position, fill model, adverse selection  [NEXT]
+
+The differentiator. `HybridBook` already maintains per-level FIFO order, which
+is the queue position the fill model needs.

@@ -146,3 +146,84 @@ they are zero.
 | intrusive: store price inline in level index (8B entries) | 56.1 | 66.0 | **reverted** — falsified the cache hypothesis; element size dominates because memmove does |
 | add hybrid design (grid addressing + intrusive FIFO) | 55.4 | 15.9 | kept — 3.36x, and retains queue position |
 | hybrid vs flat on top-of-book query (AAPL) | 22.7 | 21.8 | kept — slot load beats bit extraction |
+
+---
+
+# SPSC ring: memory ordering and false sharing
+
+## Memory ordering — the experiment this hardware makes possible
+
+x86-64 is TSO: it does not reorder store-store or load-load. A ring that
+publishes with `memory_order_relaxed` instead of release/acquire therefore
+*works on x86 by accident*, and the bug is invisible. arm64 is weakly ordered
+and will actually reorder.
+
+Same code, one policy parameter, zero-initialised ring, single lap so an
+unpublished slot is distinguishable. Payload is 8 words that must all agree.
+
+| variant | messages | zero slots | torn reads | verdict |
+|---|---:|---:|---:|---|
+| `release`/`acquire` | 10,485,600 | 0 | 0 | clean |
+| `relaxed` | 10,485,600 | **1,463** | **544** | **violations observed** |
+
+The 544 torn reads are the interesting ones: the consumer saw a slot where some
+words were the new message and some were still the previous contents. That is
+partial store visibility, and it is exactly what the release fence forbids.
+
+Reproduce with `./build/src/litmus_ring --rounds 10`. Note that a *clean*
+relaxed run is not evidence of correctness — reordering windows are
+microarchitectural, and a quiet CPU may simply not open one. The code is
+unsound on arm64 either way.
+
+## False sharing — a negative result
+
+The producer owns `tail_`, the consumer owns `head_`. Textbook advice is to pad
+them onto separate cache lines. There is a second, independent mitigation: cache
+the opposite index (`cached_head_`/`cached_tail_`) so the steady-state path
+never *reads* the other side's atomic at all. Measuring only one of the two
+cannot separate them, so all four combinations:
+
+| padding | index cache | ns/msg | ±95% | M msg/s |
+|---|---|---:|---:|---:|
+| separate lines | cached | 27.39 | 1.53 | 36.51 |
+| shared line | cached | 24.41 | 1.14 | 40.97 |
+| separate lines | uncached | 72.05 | 0.44 | 13.88 |
+| shared line | uncached | 66.59 | 1.16 | 15.02 |
+
+**Index caching is worth 2.63x (+44.7 ns/msg).** Unambiguous — the confidence
+intervals are nowhere near overlapping.
+
+**Padding shows no measurable benefit on this machine, and the shared-line
+variant is consistently slightly faster** (0.89x with caching on, 0.92x with it
+off). That replicates across both caching configurations, so it is not noise in
+the way the first, under-powered run was.
+
+Hypothesis for why, stated as a hypothesis: Apple Silicon's performance cores
+share an L2, so a contended line bounces within shared cache rather than across
+an interconnect, making the coherence cost small. Padding meanwhile spreads the
+ring's control state over three cache lines instead of one, so every operation
+touches more lines. When coherence is cheap, that extra footprint costs more
+than the sharing.
+
+**Do not generalise this to x86.** On a multi-socket box, where a contended line
+crosses an interconnect, padding would very likely pay for itself. What this
+measurement does support is narrower and still useful: *padding is not free, and
+it is the weaker of the two mitigations — the one that matters is not touching
+the other core's line in the first place.*
+
+Note the padding constant is **128 bytes**, not the 64 you would use on x86;
+`sysctl hw.cachelinesize` reports 128 on Apple Silicon and a test asserts the
+compiled constant matches the OS.
+
+## Sanitizers
+
+| build | result |
+|---|---|
+| ThreadSanitizer, full suite | clean (305,984 assertions) |
+| ASan + UBSan, full suite | clean |
+
+One wrinkle worth recording: **ASan replaces global `operator new`/`delete`**,
+which overrides ours, so the allocation counter never moves in an ASan build.
+The zero-allocation invariant cannot be verified there — the tests detect ASan
+and skip those assertions explicitly rather than passing vacuously. Invariants
+are gated in the normal build; ASan is for memory errors.
