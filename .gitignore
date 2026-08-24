@@ -1,0 +1,8 @@
+build/
+build-*/
+data/
+*.gz
+*.NASDAQ_ITCH50
+.DS_Store
+compile_commands.json
+.cache/
