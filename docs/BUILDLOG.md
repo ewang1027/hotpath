@@ -154,8 +154,51 @@ names, which is the expected result for a broad-index ETF recovered from data.
 
 ---
 
-## Remaining
+## Phase 5 — CI, determinism, regression gate  [DONE]
 
-- Phase 5: CI, plots, and the regression gate.
-- Not attempted, and stated as gaps in the README: network path, kernel bypass,
-  self-impact in the fill model, more than one trading day.
+- CI on macos-14 (arm64 on purpose) across release / TSan / ASan+UBSan. It
+  cannot fetch the 8.25 GB sample, so real-data gates live in
+  `scripts/regenerate.sh` and `scripts/regression_gate.sh`; CI runs the
+  randomised four-way book differential test, the invariants and the ring
+  stress test.
+- `scripts/check_determinism.sh`: 20 replays at -O3 plus one at -O0, hashing
+  every snapshot of every design. All four tapes match exactly. The
+  determinism claim in `METHODOLOGY.md` had been asserted without anything
+  enforcing it -- now it is measured.
+- `scripts/regression_gate.sh`: full-day parse + four-way crossval + throughput
+  within 25% of the recorded baseline. Loose on purpose; a tighter bound would
+  fail on laptop scheduling noise rather than on a real regression.
+
+---
+
+## Phase 6 — threaded pipeline  [DONE]
+
+`MarketMaker` extracted so the threaded and single-threaded paths run identical
+strategy code, then wired feed / book+strategy / gateway across two SPSC rings.
+
+**Gate: PASS** -- fill streams hash identically to the single-threaded path on
+all four symbols.
+
+**The performance result is negative and is reported as such:** pipelining is
+1.23-1.52x *slower*, at a near-constant +17 to +20 ns/event, which is the ring
+hop. Ring occupancy diagnoses it exactly (feed->strategy >=75% full 99.2% of the
+time; strategy->gateway empty 95.3%): the stages are unbalanced, so adding
+synchronisation to a critical path that did not shorten cannot pay. Full write-up
+in `PERFORMANCE.md`.
+
+Also noted there: the queue-position bookkeeping costs 3-6x book maintenance
+itself, because re-quoting re-walks the level's FIFO. Tracking it incrementally
+is the obvious next optimisation.
+
+---
+
+## Remaining / not attempted
+
+Stated as gaps in the README rather than hidden: no network path or kernel
+bypass (the pipeline is threads and shared memory, not sockets); no self-impact
+or re-quote latency in the fill model, so its fill counts are an upper bound;
+one trading day, four symbols.
+
+The highest-value next step is external to the code: run the finished binaries
+on bare-metal x86 Linux for an evening to get real p99/p99.9 tail distributions,
+which this hardware cannot produce (see `METHODOLOGY.md`).

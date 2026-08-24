@@ -32,6 +32,15 @@ imply — direct-addressed grid plus per-level intrusive FIFO — is 3.3x the
 baseline and keeps the time-priority ordering the fill model needs.
 [Details](docs/PERFORMANCE.md)
 
+**Pipelining the tick-to-trade path across lock-free rings makes it slower.**
+Splitting feed / book+strategy / gateway across three threads costs a
+near-constant +17 to +20 ns/event on every symbol — the ring hop itself — for a
+1.23x to 1.52x slowdown. Ring occupancy says why without guesswork: the first
+ring is ≥75% full 99.2% of the time and the second is empty 95.3% of it, so the
+stages are wildly unbalanced. The fill streams hash identically to the
+single-threaded path, so the handoff is correct; it just does not pay here.
+[Details](docs/PERFORMANCE.md#threaded-tick-to-trade-pipeline)
+
 **`memory_order_relaxed` in the SPSC ring reproducibly breaks on arm64** — 1,463
 premature reads and 544 torn reads per 10.5M messages, against zero for
 release/acquire. The same code passes on x86 because TSO forbids the reordering,
@@ -46,7 +55,9 @@ which is what makes this class of bug so dangerous.
 | All four drain to zero resting orders at the close | yes |
 | Full-day parse: framing, spec lengths, referential integrity | **0** orphaned references over 268.7M messages |
 | Every order live at peak (1,924,078) accounted for by the close | yes |
-| Heap allocations in steady state | **0** (enforced by replaced `operator new`) |
+| Threaded pipeline reproduces the single-threaded fill stream | identical digests, all 4 symbols |
+| Replay determinism: 20 runs at `-O3` + 1 at `-O0` | identical digests, all 4 tapes |
+| Heap allocations in steady state | **0** on the dense path; every allocation reconciles 1:1 against a `std::map` overflow level |
 | Syscalls in steady state | **0** (enforced by dyld `__interpose`) |
 | ThreadSanitizer / ASan+UBSan | clean |
 
@@ -94,8 +105,8 @@ include/hotpath/
   itch/    zero-copy ITCH 5.0 views over an mmap, BinaryFILE framing
   book/    four order book designs behind one duck-typed interface
   ipc/     SPSC ring with ordering and padding as policy parameters
-  sim/     FIFO queue position and fill model
-src/       itch_stat, extract_tape, book_crossval, sim_mm, litmus_ring
+  sim/     FIFO queue position, fill model, market maker
+src/       itch_stat, extract_tape, book_crossval, sim_mm, pipeline, litmus_ring
 bench/     book design study, false-sharing experiment
 docs/      METHODOLOGY, PERFORMANCE, ADVERSE-SELECTION, BUILDLOG
 ```
@@ -103,7 +114,7 @@ docs/      METHODOLOGY, PERFORMANCE, ADVERSE-SELECTION, BUILDLOG
 ## Known gaps
 
 No network stack, kernel bypass, or NIC timestamping — the pipeline is
-in-process. The fill model has no self-impact and no latency on re-quotes, so
+in-process (threads and shared memory, not sockets). The fill model has no self-impact and no latency on re-quotes, so
 its fill counts remain an upper bound. One trading day, four symbols.
 
 ## Related
