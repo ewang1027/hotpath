@@ -27,8 +27,32 @@ Four files carry every platform difference, all behind `#ifdef __APPLE__`:
 | `core/cache.hpp` | 128-byte lines | 64-byte lines |
 | `src/alloc_counter.cpp` | dyld `__interpose` | symbol preemption + `dlsym(RTLD_NEXT)` |
 
-Everything else — every `mmap`, the shared-memory ring, `std::atomic_ref`, all
-the `__builtin_*` intrinsics, Catch2, Verilator — is already portable.
+Everything else — every `mmap`, the shared-memory ring, all the `__builtin_*`
+intrinsics, Catch2, Verilator — is already portable.
+
+### The fifth difference is a toolchain, not a platform
+
+`std::atomic_ref` is C++20 and was the one library feature that did not port,
+in the direction nobody expects: **Linux was fine and macOS was not.** libstdc++
+has had it for years; Apple's libc++ shipped it only recently, so the AppleClang
+on GitHub's `macos-14` runner compiles every other C++20 construct in this repo
+and rejects that one name. Local builds were green the whole time — the dev
+machine is Apple clang 21, which has it — and CI went red on all four macOS jobs
+while both Linux jobs stayed green.
+
+`core/atomic_ref.hpp` feature-detects on `__cpp_lib_atomic_ref`, aliases
+`std::atomic_ref` where it exists, and otherwise falls back to the `__atomic_*`
+builtins that `std::atomic_ref` lowers to anyway. That is verifiable rather than
+assumed: `-S` output for `src/shm_pub.cpp` is byte-identical between the two
+paths, so the seqlock in `ipc/shm_ring.hpp` emits the same instructions either
+way.
+
+Pinning a newer runner image would also have gone green today, and would break
+again on the next image bump — in *either* direction, since a shim that only
+ever compiles on old toolchains rots just as silently. Hence
+`HOTPATH_FORCE_ATOMIC_REF_FALLBACK` and the `linux-atomic-ref-fallback` CI job,
+which builds the fallback on a toolchain that does not need it. Same reasoning
+as building Linux at all.
 
 One check changed semantics in the process. `cache_line_matches_os()` became
 `cache_line_covers_os()`, asserting `kCacheLine >= os_line` rather than

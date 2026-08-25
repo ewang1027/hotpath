@@ -719,6 +719,45 @@ measured Fmax.
 
 ---
 
+## Phase 16 — the CI failure a green local build was hiding  [DONE]
+
+CI had been red on every macOS job since Phase 14 while both Linux jobs stayed
+green, and the local build never once complained. One cause:
+`std::atomic_ref` — C++20, used throughout `ipc/shm_ring.hpp`, and absent from
+the libc++ on GitHub's `macos-14` runner. The dev machine is Apple clang 21 and
+has it, so the gap was invisible from here.
+
+The direction is the interesting part. Every other portability problem in this
+repo runs macOS-works / Linux-needs-a-port; this one is the reverse, and it is a
+*toolchain* difference rather than a platform one. `__cpp_lib_atomic_ref` is
+exactly the right check and costs nothing, which is why `core/atomic_ref.hpp`
+feature-detects instead of pinning a runner image — an image pin goes green
+today and breaks on the next bump.
+
+The fallback maps onto the `__atomic_*` builtins `std::atomic_ref` already
+lowers to, so it is a spelling change and not a second atomics implementation.
+Verified rather than asserted: `-S` output for `src/shm_pub.cpp` is
+**byte-identical** between the two paths. Both paths run 66/66 tests, ASan+UBSan
+included, and the forced-fallback build passes the full two-process demo — 
+1,512,179 messages, 0 gaps, digest `17bc4567950ee09f`, matching the in-process
+reference exactly.
+
+### Traps hit
+
+- **A shim that only compiles where it is needed rots exactly like the code it
+  replaces.** Today the macOS jobs exercise the fallback because their libc++
+  lacks `atomic_ref`; the moment that image gains it, nothing would compile the
+  fallback again and it would quietly decay. Hence
+  `HOTPATH_FORCE_ATOMIC_REF_FALLBACK` and the `linux-atomic-ref-fallback` job,
+  which builds it on a toolchain that does not need it — same argument as
+  building Linux at all.
+- **`ninja` stops at the first failing batch**, so "fix the error you see" is
+  not the same as "fix the build". Grepping the whole tree for the other
+  late-landing C++20 library features (`bit_cast`, `span`, `format`, `ranges`,
+  `jthread`, `<bit>`) before pushing confirmed `atomic_ref` was the only one.
+
+---
+
 ## Remaining / not attempted
 
 Stated as gaps in the README rather than hidden: no network path or kernel

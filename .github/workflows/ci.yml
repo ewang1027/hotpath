@@ -61,6 +61,13 @@ jobs:
             flags: "-DCMAKE_BUILD_TYPE=Release"
           - name: asan-ubsan
             flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOTPATH_ASAN=ON"
+          # Builds core/atomic_ref.hpp's fallback on a toolchain that has the
+          # real std::atomic_ref, so the shim cannot rot. Today the macOS jobs
+          # take that path anyway -- their libc++ has no atomic_ref, which is
+          # what the shim is for -- but they will stop doing so the moment the
+          # runner image gains it, and then nothing would compile the fallback.
+          - name: atomic-ref-fallback
+            flags: "-DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-DHOTPATH_FORCE_ATOMIC_REF_FALLBACK"
     name: linux-${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4

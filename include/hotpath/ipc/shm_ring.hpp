@@ -1,4 +1,5 @@
 #pragma once
+#include "hotpath/core/atomic_ref.hpp"
 #include "hotpath/core/cache.hpp"
 
 #include <atomic>
@@ -29,11 +30,16 @@ namespace hotpath::ipc {
 // is different: it is not an optimisation you chose, it is a constraint you
 // have, and shared memory is how you cross it without a copy through the kernel.
 //
-// Atomics are std::atomic_ref over plain integers in the mapping rather than
+// Atomics are atomic_ref over plain integers in the mapping rather than
 // std::atomic objects placement-new'd into it. Constructing an atomic in
 // another process's mapping is the usual approach and is not actually
 // well-defined; atomic_ref is, and it is lock-free for uint64 on every target
 // this runs on (asserted below).
+//
+// hotpath::atomic_ref, not std::atomic_ref: the type is C++20 but is one of the
+// last library features to land, and the AppleClang on GitHub's macos-14 runner
+// does not have it. core/atomic_ref.hpp aliases std::atomic_ref where it exists
+// and falls back to the __atomic builtins it lowers to where it does not.
 
 inline constexpr std::uint64_t kShmMagic = 0x484F5450'52494E47ull;  // "HOTPRING"
 inline constexpr std::uint32_t kShmVersion = 1;
@@ -57,7 +63,7 @@ struct ShmHeader {
   // per-message.
   alignas(kCacheLine) std::uint64_t write_seq;
 };
-static_assert(std::atomic_ref<std::uint64_t>::required_alignment <= 8);
+static_assert(hotpath::atomic_ref<std::uint64_t>::required_alignment <= 8);
 
 // Per slot: a seqlock version word, the message sequence, then the payload.
 //   version odd  -> a write is in progress, the payload is not readable
@@ -102,7 +108,7 @@ public:
     h->slot_bytes = slot_bytes;
     h->capacity = capacity_pow2;
     h->slot_stride = stride;
-    std::atomic_ref<std::uint64_t>(h->magic).store(kShmMagic, std::memory_order_release);
+    hotpath::atomic_ref<std::uint64_t>(h->magic).store(kShmMagic, std::memory_order_release);
     r.finish_open();
     return r;
   }
@@ -120,7 +126,7 @@ public:
     // atomic_ref requires a non-const T; the mapping is writable either way,
     // the constness was only on the accessor.
     ShmHeader* h = r.header();
-    if (std::atomic_ref<std::uint64_t>(h->magic).load(std::memory_order_acquire) != kShmMagic)
+    if (hotpath::atomic_ref<std::uint64_t>(h->magic).load(std::memory_order_acquire) != kShmMagic)
       throw std::runtime_error("not a hotpath ring: " + path);
     if (h->version != kShmVersion)
       throw std::runtime_error("ring version mismatch: " + path);
@@ -136,7 +142,7 @@ public:
     ShmHeader* h = header();
     const std::uint64_t seq = h->write_seq;          // producer-private
     SlotHeader* s = slot(seq & mask_);
-    std::atomic_ref<std::uint64_t> ver(s->version);
+    hotpath::atomic_ref<std::uint64_t> ver(s->version);
 
     const std::uint64_t v = ver.load(std::memory_order_relaxed);
     ver.store(v + 1, std::memory_order_release);     // odd: write in progress
@@ -146,7 +152,7 @@ public:
     std::memcpy(payload(s), data, n < h->slot_bytes ? n : h->slot_bytes);
 
     ver.store(v + 2, std::memory_order_release);     // even: consistent again
-    std::atomic_ref<std::uint64_t>(h->write_seq).store(seq + 1, std::memory_order_release);
+    hotpath::atomic_ref<std::uint64_t>(h->write_seq).store(seq + 1, std::memory_order_release);
   }
 
   // ---- consumer ----
@@ -157,7 +163,7 @@ public:
                   std::uint64_t& gap) const noexcept {
     ShmHeader* h = header();
     const std::uint64_t published =
-        std::atomic_ref<std::uint64_t>(h->write_seq).load(std::memory_order_acquire);
+        hotpath::atomic_ref<std::uint64_t>(h->write_seq).load(std::memory_order_acquire);
     if (next >= published) return Status::Empty;
 
     // Anything older than published - capacity has certainly been overwritten.
@@ -168,7 +174,7 @@ public:
     }
 
     SlotHeader* s = slot(next & mask_);
-    std::atomic_ref<std::uint64_t> ver(s->version);
+    hotpath::atomic_ref<std::uint64_t> ver(s->version);
 
     for (int attempt = 0; attempt < 64; ++attempt) {
       const std::uint64_t v1 = ver.load(std::memory_order_acquire);
@@ -195,26 +201,26 @@ public:
   }
 
   [[nodiscard]] std::uint64_t published() const noexcept {
-    return std::atomic_ref<std::uint64_t>(header()->write_seq)
+    return hotpath::atomic_ref<std::uint64_t>(header()->write_seq)
         .load(std::memory_order_acquire);
   }
   [[nodiscard]] std::uint64_t capacity() const noexcept { return capacity_; }
 
   std::uint64_t attach_reader() noexcept {
-    return std::atomic_ref<std::uint64_t>(header()->reader_count)
+    return hotpath::atomic_ref<std::uint64_t>(header()->reader_count)
         .fetch_add(1, std::memory_order_acq_rel) + 1;
   }
   [[nodiscard]] std::uint64_t readers() const noexcept {
-    return std::atomic_ref<std::uint64_t>(header()->reader_count)
+    return hotpath::atomic_ref<std::uint64_t>(header()->reader_count)
         .load(std::memory_order_acquire);
   }
   void mark_eof() noexcept {
-    std::atomic_ref<std::uint64_t>(header()->eof_seq)
+    hotpath::atomic_ref<std::uint64_t>(header()->eof_seq)
         .store(published() + 1, std::memory_order_release);
   }
   // 0 while the publisher is still running.
   [[nodiscard]] std::uint64_t eof() const noexcept {
-    return std::atomic_ref<std::uint64_t>(header()->eof_seq)
+    return hotpath::atomic_ref<std::uint64_t>(header()->eof_seq)
         .load(std::memory_order_acquire);
   }
   [[nodiscard]] std::uint32_t slot_bytes() const noexcept { return header()->slot_bytes; }
