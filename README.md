@@ -94,7 +94,7 @@ which is what makes this class of bug so dangerous.
 | Heap allocations in steady state | **0** on the dense path; every allocation reconciles 1:1 against a `std::map` overflow level |
 | Syscalls in steady state | **0** (enforced by dyld `__interpose`) |
 | ThreadSanitizer / ASan+UBSan | clean |
-| Fuzzing: ITCH parser + four-way book differential, under ASan | 150,000 iterations / 154 MB, 0 failures |
+| Fuzzing: ITCH parser + four-way book differential, under ASan | 550,000 iterations / 566 MB, 0 failures |
 
 The cross-validation is not ceremony: it caught the intrusive book *silently
 dropping orders* when its level pool filled, which left the book permanently

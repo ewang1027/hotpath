@@ -556,8 +556,9 @@ per-type length. A regression test sweeps every type byte at every length below
 That is the argument for fuzzing in one paragraph: the manual fix was correct
 as far as it went, and the case it missed was the one nobody thinks about.
 
-**Campaign result after both fixes:** 150,000 iterations, 154 MB of generated
-input, 0 failures, ~1,800 iterations/sec under ASan. The full-day parse is
+**Campaign result after both fixes:** 550,000 iterations across two seeds
+(150k + 400k), 566 MB of generated input, 0 failures, ~1,830 iterations/sec
+under ASan. The full-day parse is
 byte-for-byte unaffected -- 268,744,780 messages, zero length mismatches, zero
 bytes unread.
 
