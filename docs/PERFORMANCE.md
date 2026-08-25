@@ -193,6 +193,76 @@ because a second implementation disagreed, which is not a diagnostic available
 in production. Both bounded designs now count rejections and every gate asserts
 they are zero.
 
+# Where the parse time actually goes
+
+`itch_stat` reports ~35 ns/message over the full day, but that is three things
+added together, and optimising it blind is guesswork. `bench_parse` separates
+them (a discarded warm-up pass first, because the first pass over a 7.7 GB
+mapping measures disk):
+
+| stage | ns/msg | marginal |
+|---|---:|---:|
+| framing only (walk length prefixes, touch no fields) | 14.2 | — |
+| + decode every field of every book message | 14.7 | +0.4 |
+| + maintain the live-order index | 32.3 | **+17.6** |
+
+**The hash probe is more than half the cost**, and it is a random access by
+construction — the hash exists to make it so — into a table far larger than any
+cache. Everything else is close to free.
+
+## Two optimisations that made it worse
+
+### Right-sizing the order table: a 2x regression
+
+Peak concurrently-live orders is 1,924,078 against a 2^24-slot table, a load
+factor of 0.115. Shrinking it looked obviously right: less memory, better TLB
+behaviour. It is the opposite.
+
+| slots | table | load | index stage |
+|---:|---|---:|---:|
+| 4.19 M | 67 MB | 0.459 | **25.2 ns** |
+| 8.39 M | 134 MB | 0.229 | 15.7 ns |
+| 16.8 M | 268 MB | 0.115 | **11.8 ns** ← current default |
+| 33.6 M | 537 MB | 0.057 | 13.2 ns |
+| 67.1 M | 1074 MB | 0.029 | 11.4 ns |
+
+Linear probing degrades faster with load than the TLB does with size. At 0.459
+the probe sequences cluster and each extra step is another cache line; at 0.115
+almost every lookup hits on the first probe. The curve is flat past the current
+default, so the existing choice is already at the knee — and the "obvious"
+change would have cost 2x.
+
+### Software-prefetching the probe: 1.7–2.7x slower
+
+The theory is sound: the probe is a random miss, its address is knowable in
+advance from a length-prefixed stream, so a lookahead window could issue the
+miss early and overlap it with useful work. `OpenHashMap::prefetch()` exists for
+exactly this.
+
+It does not pay. Measured at lookahead 0 / 8 / 16 across three separate runs,
+the pipelined version is consistently **1.7–2.7x slower**.
+
+The first attempt was slower still (2.7x) for an unrelated reason worth
+recording: the window wrap was `% window.size()` on a runtime value, which is an
+integer division — 20–40 cycles — executed once per message. Replacing it with a
+mask recovered some of that and left the conclusion unchanged.
+
+Why it fails: the probe averages ~12–18 ns, which is an L2/L3 hit rather than a
+full DRAM miss, so there is far less latency to hide than the design assumes.
+Only about 55% of messages probe the index at all. And the bookkeeping — window
+copies, re-decoding each message's key a second time to compute its slot — costs
+more than the miss it hides.
+
+### And one that is simply below the noise floor
+
+`spec_length()` was a 22-case switch over sparse ASCII values, evaluated once
+per message on a 268-million-message file. It is now a dense 256-entry
+`constexpr` table: one L1 load, no branch, 512 bytes resident forever. It is
+better code and it is kept, but the measured difference is **inside the
+confidence interval** (framing 14.2 ± 2.6 before and after). This machine cannot
+resolve a 1–2 ns/message change, which is the same limit `METHODOLOGY.md`
+describes from the other direction.
+
 ## Optimisation log
 
 | change | before | after | verdict |
@@ -201,6 +271,9 @@ they are zero.
 | add hybrid design (grid addressing + intrusive FIFO) | 55.4 | 15.9 | kept — 3.36x, and retains queue position |
 | hybrid vs flat on top-of-book query (AAPL) | 22.7 | 21.8 | kept — slot load beats bit extraction |
 | queue position: FIFO walk → monotonic insertion stamp (AAPL, full strategy) | 104.50 | 36.05 | kept — **2.90x**, bit-identical output |
+| order index: shrink table to fit peak live orders | 11.8 | 25.2 | **rejected** — linear probing degrades with load faster than the TLB does with size |
+| order index: software prefetch with a lookahead window | 13.8 | 42.4 | **rejected** — the probe is an L2/L3 hit, not a DRAM miss; the bookkeeping costs more than it hides |
+| `spec_length()`: sparse switch → dense 256-entry table | 14.2 | 14.3 | kept on merit, **no measurable effect** (inside the CI) |
 
 ---
 

@@ -47,6 +47,19 @@ public:
     return x;
   }
 
+  // Bring the slot a key would land in into cache without using it yet.
+  //
+  // The probe into this table is the single most expensive thing in the parse
+  // -- measured at 15-25 ns of a ~35 ns message, entirely cache and TLB misses
+  // on a table far larger than any cache. The access pattern is random by
+  // construction (the hash exists to make it so), so hardware prefetching
+  // cannot help. But the *sequence* of keys is knowable in advance from a
+  // length-prefixed stream, so software can issue the miss early and let it
+  // overlap with useful work.
+  void prefetch(std::uint64_t key) const noexcept {
+    __builtin_prefetch(&slots_[hash(key) & mask_], 0 /*read*/, 1 /*low locality*/);
+  }
+
   [[nodiscard]] Value* find(std::uint64_t key) noexcept {
     std::size_t i = hash(key) & mask_;
     while (true) {

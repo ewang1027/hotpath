@@ -37,18 +37,27 @@ enum class MsgType : char {
 // The file's 2-byte prefix is what actually drives iteration -- that way an
 // unknown or newly-added message type is skipped cleanly instead of
 // desynchronising the whole stream. Returns 0 for "not in the table".
-[[nodiscard]] constexpr std::uint16_t spec_length(char t) noexcept {
-  switch (t) {
-    case 'S': return 12;  case 'R': return 39;  case 'H': return 25;
-    case 'Y': return 20;  case 'L': return 26;  case 'V': return 35;
-    case 'W': return 12;  case 'K': return 28;  case 'J': return 35;
-    case 'h': return 21;  case 'A': return 36;  case 'F': return 40;
-    case 'E': return 31;  case 'C': return 36;  case 'X': return 23;
-    case 'D': return 19;  case 'U': return 35;  case 'P': return 44;
-    case 'Q': return 40;  case 'B': return 19;  case 'I': return 50;
-    case 'N': return 20;
-    default:  return 0;
+//
+// A dense 256-entry table rather than a switch. The switch is evaluated once
+// per message on a 268-million-message file, and 22 sparse cases over the ASCII
+// range compile to a chain of compares or a jump table with a range check;
+// the array is a single L1 load with no branch. 512 bytes, resident forever.
+namespace detail {
+struct SpecLengthTable {
+  std::uint16_t v[256]{};
+  constexpr SpecLengthTable() {
+    v['S'] = 12; v['R'] = 39; v['H'] = 25; v['Y'] = 20; v['L'] = 26;
+    v['V'] = 35; v['W'] = 12; v['K'] = 28; v['J'] = 35; v['h'] = 21;
+    v['A'] = 36; v['F'] = 40; v['E'] = 31; v['C'] = 36; v['X'] = 23;
+    v['D'] = 19; v['U'] = 35; v['P'] = 44; v['Q'] = 40; v['B'] = 19;
+    v['I'] = 50; v['N'] = 20;
   }
+};
+inline constexpr SpecLengthTable kSpecLength{};
+} // namespace detail
+
+[[nodiscard]] constexpr std::uint16_t spec_length(char t) noexcept {
+  return detail::kSpecLength.v[static_cast<unsigned char>(t)];
 }
 
 // Every ITCH message begins with this header, so 11 bytes is the universal
