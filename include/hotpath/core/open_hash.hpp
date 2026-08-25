@@ -61,20 +61,24 @@ public:
     return const_cast<OpenHashMap*>(this)->find(key);
   }
 
-  // Returns nullptr if the table is full. No growth, by design.
+  // Returns nullptr only if a NEW key cannot be accommodated. No growth, by design.
   Value* insert(std::uint64_t key, const Value& v) noexcept {
-    if (size_ + 1 > (slots_.size() * 7) / 10) return nullptr;
     std::size_t i = hash(key) & mask_;
     while (true) {
       const std::uint64_t k = slots_[i].key;
+      if (k == key) {            // replace in place: occupies no new slot
+        slots_[i].value = v;
+        return &slots_[i].value;
+      }
       if (k == kEmpty) {
+        // The load-factor limit applies to occupying a new slot, and must be
+        // checked HERE rather than on entry. Checked up front it also rejects
+        // in-place updates of keys already present, which consume no space --
+        // callers read that nullptr as "table full" and drop the write.
+        if (size_ + 1 > (slots_.size() * 7) / 10) return nullptr;
         slots_[i].key = key;
         slots_[i].value = v;
         ++size_;
-        return &slots_[i].value;
-      }
-      if (k == key) {            // replace in place
-        slots_[i].value = v;
         return &slots_[i].value;
       }
       i = (i + 1) & mask_;

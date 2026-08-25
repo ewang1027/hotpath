@@ -212,6 +212,38 @@ INTC, higher latency therefore looks *better* on the dollar axis while fill
 quality is plainly getting worse. Per-share markout is the honest metric for a
 strategy that should not be trading in the first place.
 
+## The model's central assumption, measured
+
+The queue model advances on volume consumed at a price level, which is only
+sound if the exchange consumes that level in strict time priority. That
+assumption is checkable, so it is checked rather than believed.
+
+Walking each level's FIFO and asking whether the executed order was actually at
+its head:
+
+| symbol | executions | not at the FIFO head |
+|---|---:|---:|
+| AAPL | 60,543 | 759 (1.25%) |
+| SPY | 42,635 | 1,346 (3.16%) |
+| MSFT | 35,315 | 1,589 (4.50%) |
+| INTC | 19,405 | 521 (2.68%) |
+| AMZN | 15,123 | 402 (2.66%) |
+
+So strict FIFO does **not** hold on the displayed book — unsurprising, since
+ITCH shows displayed liquidity and the matching engine ranks on more than that.
+
+The case that actually threatens the model is narrower: an order that arrived
+*after* we joined trading while volume we believe is ahead of us still rests.
+`sim_mm` reports it (`strict-FIFO violations observed`), and it is rare — 73 on
+AAPL against 9,535 fills, 855 on SPY, 0 on AMZN.
+
+One tempting "fix" is wrong and worth recording. Requiring the executed order to
+be ahead of us before advancing the queue sounds principled; it drops the fill
+count to **exactly zero** on every symbol. We join at the back, so once
+everything ahead has been consumed the only orders still resting arrived after
+we did — the execution that legitimately reaches us is *always* one of those.
+What governs is the volume consumed at the level, not which order consumed it.
+
 ## Honest limitations
 
 - **No self-impact.** Our order is hypothetical and never enters the book, so it
@@ -221,6 +253,8 @@ strategy that should not be trading in the first place.
   moves. It is a measurement instrument for the fill model, not a proposal.
 - **Latency is modelled as a fixed delay**, symmetric for cancels and new
   orders, with no queueing or jitter.
+- **Strict FIFO is assumed and is not exactly true** (see above): 1.3–4.5% of
+  executions are not at the level's FIFO head, and the model absorbs those.
 - **Queue-position-only fill priority.** Hidden orders, odd-lot handling, and
   non-displayed liquidity are not modelled; ITCH does not show them.
 - **One day, four symbols.** The direction of every result is consistent across

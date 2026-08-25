@@ -55,11 +55,35 @@ public:
   // An execution happened at our price level. Returns how many shares of OURS
   // were filled: the exchange consumes the queue from the front, so we are only
   // reached once cumulative executed volume exceeds the volume ahead of us.
-  [[nodiscard]] Qty on_execution(Qty executed, Qty our_remaining) noexcept {
+  //
+  // `seq` is the executed order's insertion stamp, used only for diagnostics.
+  //
+  // It is tempting to require that the executed order be ahead of us before
+  // advancing the queue. That is WRONG, and measurably so: we join at the back,
+  // so once everything ahead has been consumed the only orders still resting
+  // are ones that arrived after we did. The execution that legitimately reaches
+  // us is therefore always an order "behind" our join stamp -- gating on that
+  // drops the fill count to exactly zero on every symbol.
+  //
+  // What governs is the volume consumed at the level, not which order consumed
+  // it. `behind_while_queued_` counts the genuinely suspicious case: an order
+  // that arrived after us executing while we still believe volume rests ahead.
+  [[nodiscard]] Qty on_execution(std::uint32_t seq, Qty executed, Qty our_remaining) noexcept {
+    if (ahead_ > 0 && !is_ahead(seq)) ++behind_while_queued_;
     if (executed <= ahead_) { ahead_ -= executed; return 0; }
     const Qty through = executed - ahead_;
     ahead_ = 0;
     return through < our_remaining ? through : our_remaining;
+  }
+
+  // Executions of an order that arrived after we joined, while volume we
+  // believe is ahead of us still rests. Under strict price-time priority this
+  // should be zero. On real ITCH it is not -- 1.3-4.5% of executions are not at
+  // the level's FIFO head, because the displayed book does not show everything
+  // the matching engine ranks on. Exposed so the model's central assumption is
+  // measured rather than believed.
+  [[nodiscard]] std::uint64_t behind_while_queued() const noexcept {
+    return behind_while_queued_;
   }
 
   // An order ahead of us was cancelled (partially) -- the queue shortens with
@@ -79,6 +103,7 @@ private:
   Qty           ahead_{0};
   std::uint32_t join_seq_{0};
   bool          joined_{false};
+  std::uint64_t behind_while_queued_{0};
 };
 
 } // namespace hotpath::sim

@@ -66,16 +66,31 @@ int main(int argc, char** argv) {
     symbol_to_target[targets[i].symbol.raw] = i;
   }
 
-  // Global routing index. Value is the target slot + 1, or 0 for "an order in
-  // a symbol we do not care about" -- we still must track those, because a
-  // reference we have never seen would otherwise look like corruption.
-  OpenHashMap<std::uint16_t> route(table_pow2);
+  // Global routing index: order reference -> which target it belongs to, plus
+  // the shares still resting.
+  //
+  // The shares are not decoration. Without them there is no way to know when an
+  // order is fully executed or fully cancelled, and entries for finished orders
+  // accumulate for the whole session: measured at 4,270,459 entries against a
+  // peak of 1,924,078 concurrently-live orders, a 2.2x leak. It stayed under
+  // the load factor on this day, but a busier one would overflow and start
+  // dropping events from the tapes.
+  struct Route {
+    std::uint32_t shares;
+    std::uint16_t slot;    // target index + 1; 0 = a symbol we do not want
+  };
+  OpenHashMap<Route> route(table_pow2);
 
   Reader reader(file.data(), file.size());
   RawMessage m{};
-  std::uint64_t routed = 0, unroutable = 0;
+  double peak_load = 0.0;
+  std::uint64_t routed = 0, unroutable = 0, insert_failed = 0;
 
   while (reader.next(m)) {
+    if ((reader.stats().messages & 0xFFFFF) == 0) {
+      const double lf = route.load_factor();
+      if (lf > peak_load) peak_load = lf;
+    }
     const char t = m.type();
     switch (t) {
       case 'R': {
@@ -93,11 +108,11 @@ int main(int argc, char** argv) {
         auto it = locate_to_target.find(v.locate());
         const std::uint16_t slot =
             it == locate_to_target.end() ? 0 : static_cast<std::uint16_t>(it->second + 1);
-        route.insert(v.order_ref(), slot);
+        if (!route.insert(v.order_ref(), Route{v.shares(), slot})) ++insert_failed;
         if (slot) {
           targets[slot - 1].events.push_back(BookEvent{
               v.timestamp(), v.order_ref(), 0, v.price(), v.shares(),
-              EventType::Add, v.side(), 0});
+              EventType::Add, v.side(), 0, 0});
           ++routed;
         }
         break;
@@ -105,36 +120,42 @@ int main(int argc, char** argv) {
       case 'E':
       case 'C': {
         const OrderExecutedView v{m.body};
-        const std::uint16_t* slot = route.find(v.order_ref());
-        if (!slot) { ++unroutable; break; }
-        if (*slot) {
-          targets[*slot - 1].events.push_back(BookEvent{
+        Route* r = route.find(v.order_ref());
+        if (!r) { ++unroutable; break; }
+        if (r->slot) {
+          targets[r->slot - 1].events.push_back(BookEvent{
               v.timestamp(), v.order_ref(), 0, 0, v.executed_shares(),
-              EventType::Execute, Side::Buy, 0});
+              EventType::Execute, Side::Buy, 0, 0});
           ++routed;
         }
+        // Fully executed: retire it, or the index leaks for the whole session.
+        const Qty take = v.executed_shares() < r->shares ? v.executed_shares() : r->shares;
+        if ((r->shares -= take) == 0) route.erase(v.order_ref());
         break;
       }
       case 'X': {
         const OrderCancelView v{m.body};
-        const std::uint16_t* slot = route.find(v.order_ref());
-        if (!slot) { ++unroutable; break; }
-        if (*slot) {
-          targets[*slot - 1].events.push_back(BookEvent{
+        Route* r = route.find(v.order_ref());
+        if (!r) { ++unroutable; break; }
+        if (r->slot) {
+          targets[r->slot - 1].events.push_back(BookEvent{
               v.timestamp(), v.order_ref(), 0, 0, v.cancelled_shares(),
-              EventType::Cancel, Side::Buy, 0});
+              EventType::Cancel, Side::Buy, 0, 0});
           ++routed;
         }
+        // Fully cancelled: same leak, same fix.
+        const Qty take = v.cancelled_shares() < r->shares ? v.cancelled_shares() : r->shares;
+        if ((r->shares -= take) == 0) route.erase(v.order_ref());
         break;
       }
       case 'D': {
         const OrderDeleteView v{m.body};
-        const std::uint16_t* slot = route.find(v.order_ref());
-        if (!slot) { ++unroutable; break; }
-        if (*slot) {
-          targets[*slot - 1].events.push_back(BookEvent{
+        const Route* r = route.find(v.order_ref());
+        if (!r) { ++unroutable; break; }
+        if (r->slot) {
+          targets[r->slot - 1].events.push_back(BookEvent{
               v.timestamp(), v.order_ref(), 0, 0, 0,
-              EventType::Delete, Side::Buy, 0});
+              EventType::Delete, Side::Buy, 0, 0});
           ++routed;
         }
         route.erase(v.order_ref());
@@ -142,17 +163,17 @@ int main(int argc, char** argv) {
       }
       case 'U': {
         const OrderReplaceView v{m.body};
-        const std::uint16_t* slot = route.find(v.original_ref());
-        if (!slot) { ++unroutable; break; }
-        const std::uint16_t s = *slot;
+        const Route* r = route.find(v.original_ref());
+        if (!r) { ++unroutable; break; }
+        const std::uint16_t s = r->slot;
         if (s) {
           targets[s - 1].events.push_back(BookEvent{
               v.timestamp(), v.original_ref(), v.new_ref(), v.price(), v.shares(),
-              EventType::Replace, Side::Buy, 0});
+              EventType::Replace, Side::Buy, 0, 0});
           ++routed;
         }
         route.erase(v.original_ref());
-        route.insert(v.new_ref(), s);
+        if (!route.insert(v.new_ref(), Route{v.shares(), s})) ++insert_failed;
         break;
       }
       default: break;
@@ -163,6 +184,15 @@ int main(int argc, char** argv) {
   std::printf("routed events: %" PRIu64 "\n", routed);
   std::printf("unroutable   : %" PRIu64 "  (references to orders added before this slice)\n",
               unroutable);
+  std::printf("route table  : %zu / %zu entries, peak load %.3f, insert failures %" PRIu64 "\n",
+              route.size(), route.capacity(), peak_load, insert_failed);
+  if (insert_failed) {
+    std::fprintf(stderr,
+        "FATAL: routing table full -- %" PRIu64 " orders could not be indexed, so the\n"
+        "       emitted tapes are missing events. Re-run with a larger --table.\n",
+        insert_failed);
+    return 1;
+  }
 
   int rc = 0;
   for (std::size_t i = 0; i < targets.size(); ++i) {

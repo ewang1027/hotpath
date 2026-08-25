@@ -88,3 +88,11 @@ TEST_CASE("aligned operator new accepts sizes that are not multiples of the alig
     ::operator delete(p, std::align_val_t{kCacheLine});
   }
 }
+
+// Regression: the wrap is a mask, not a modulo, so a non-power-of-two capacity
+// silently aliased slots instead of failing. OpenHashMap already rejected this.
+TEST_CASE("ring: rejects a capacity that is not a power of two", "[ring]") {
+  REQUIRE_THROWS(SpscRing<int>(100));
+  REQUIRE_THROWS(SpscRing<int>(0));
+  REQUIRE_NOTHROW(SpscRing<int>(128));
+}

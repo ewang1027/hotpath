@@ -115,6 +115,11 @@ public:
   [[nodiscard]] bool have_mid() const noexcept { return have_mid_; }
   [[nodiscard]] double mid() const noexcept { return mid_; }
   [[nodiscard]] std::uint64_t requotes() const noexcept { return requotes_; }
+  // Diagnostic: how often the strict-FIFO assumption behind the queue model was
+  // observably violated. See QueuePosition::behind_while_queued().
+  [[nodiscard]] std::uint64_t behind_while_queued() const noexcept {
+    return pos_bid_.behind_while_queued() + pos_ask_.behind_while_queued();
+  }
 
 private:
   struct Quote {
@@ -153,7 +158,7 @@ private:
     if (pre_px != q.px) return;
     switch (e.type) {
       case EventType::Execute: {
-        const Qty f = pos.on_execution(e.shares, q.remaining);
+        const Qty f = pos.on_execution(pre_seq, e.shares, q.remaining);
         if (f) {
           cb(Fill{e.ts, q.px, f, side, q.ahead_at_join, q.in_flight, false});
           q.remaining -= f;

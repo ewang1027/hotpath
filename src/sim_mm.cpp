@@ -201,6 +201,11 @@ int main(int argc, char** argv) {
   if (sh_q)
     std::printf("\n  the naive model overstates filled volume by %.1fx\n",
                 static_cast<double>(sh_n) / static_cast<double>(sh_q));
+  // Model-assumption check, not a result: how often an order that arrived after
+  // we joined traded while volume we believe is ahead of us still rested. Under
+  // strict price-time priority this is impossible.
+  std::printf("  strict-FIFO violations observed: %" PRIu64
+              " (see docs/ADVERSE-SELECTION.md)\n", mm.behind_while_queued());
 
   report_markouts("naive", fills_n, mids);
   report_markouts("queue-aware", fills_q, mids);

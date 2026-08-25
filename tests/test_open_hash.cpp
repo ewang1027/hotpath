@@ -96,3 +96,24 @@ TEST_CASE("open hash: backward-shift deletion matches a reference map", "[hash][
     REQUIRE(*got == v);
   }
 }
+
+// Regression: the load-factor limit was checked on entry, so once the table
+// passed 70% it also rejected in-place updates of keys already present -- which
+// occupy no new slot. Callers read that nullptr as "table full" and drop the
+// write, silently losing an update.
+TEST_CASE("open hash: updates to existing keys work at any load", "[hash]") {
+  OpenHashMap<std::uint32_t> m(16);          // 70% of 16 == 11 usable slots
+  std::vector<std::uint64_t> present;
+  for (std::uint64_t k = 1; k <= 32; ++k)
+    if (m.insert(k, static_cast<std::uint32_t>(k))) present.push_back(k);
+
+  REQUIRE_FALSE(present.empty());
+  REQUIRE(m.insert(99999, 1) == nullptr);    // a NEW key is still refused
+
+  for (std::uint64_t k : present) {          // every existing key still updatable
+    INFO("key " << k);
+    REQUIRE(m.insert(k, 4242) != nullptr);
+    REQUIRE(*m.find(k) == 4242);
+  }
+  REQUIRE(m.size() == present.size());       // and no slot was consumed doing it
+}

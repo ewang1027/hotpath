@@ -11,13 +11,13 @@ using namespace hotpath::sim;
 namespace {
 
 BookEvent add(OrderId ref, Side s, Price px, Qty q, Ts ts) {
-  return BookEvent{ts, ref, 0, px, q, EventType::Add, s, 0};
+  return BookEvent{ts, ref, 0, px, q, EventType::Add, s, 0, 0};
 }
 BookEvent exec(OrderId ref, Qty q, Ts ts) {
-  return BookEvent{ts, ref, 0, 0, q, EventType::Execute, Side::Buy, 0};
+  return BookEvent{ts, ref, 0, 0, q, EventType::Execute, Side::Buy, 0, 0};
 }
 BookEvent del(OrderId ref, Ts ts) {
-  return BookEvent{ts, ref, 0, 0, 0, EventType::Delete, Side::Buy, 0};
+  return BookEvent{ts, ref, 0, 0, 0, EventType::Delete, Side::Buy, 0, 0};
 }
 
 // Builds a two-sided book, lets the maker's FIRST quote land, then removes the

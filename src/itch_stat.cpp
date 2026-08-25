@@ -155,6 +155,10 @@ int main(int argc, char** argv) {
   std::printf("unknown types     : %" PRIu64 "\n", st.unknown_type);
   std::printf("length mismatches : %" PRIu64 "\n", st.length_mismatch);
   std::printf("truncated tail    : %" PRIu64 "\n", st.truncated);
+  std::printf("zero-length frame : %" PRIu64 "\n", st.zero_length);
+  const std::uint64_t unread = file.size() - st.bytes;
+  std::printf("bytes unread      : %" PRIu64 "  %s\n", unread,
+              unread == 0 ? "[OK: whole file consumed]" : "[VIOLATION: parse stopped early]");
 
   std::printf("\n-- message mix --\n");
   for (int t = 0; t < 256; ++t) {
@@ -193,7 +197,12 @@ int main(int argc, char** argv) {
   std::printf("ingest            : %.2f GiB/s\n",
               static_cast<double>(st.bytes) / secs / (1024.0 * 1024.0 * 1024.0));
 
-  const bool pass = st.length_mismatch == 0 && st.truncated == 0 &&
+  // Consuming the whole file is part of the gate. Without it a stream that
+  // stops early -- on a zero-length prefix, say -- reports zero errors of every
+  // other kind and passes, having read a fraction of the messages. Verified:
+  // before this check a 116-byte fixture with 2 of 3 messages skipped passed.
+  const bool pass = unread == 0 && st.zero_length == 0 &&
+                    st.length_mismatch == 0 && st.truncated == 0 &&
                     integ.orphan_execute == 0 && integ.orphan_cancel == 0 &&
                     integ.orphan_delete == 0 && integ.orphan_replace == 0 &&
                     integ.table_full == 0 && d.allocations == 0 && d.syscalls == 0;

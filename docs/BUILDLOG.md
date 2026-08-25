@@ -328,6 +328,62 @@ have shipped the price story.
 
 ---
 
+## Phase 10 — bug hunt  [DONE]
+
+A deliberate pass looking for defects the green build was hiding. Five real
+bugs, none of which any test was failing on.
+
+1. **`OpenHashMap::insert` rejected in-place updates once the table passed its
+   load factor.** The limit was checked on entry rather than at the point of
+   occupying a new slot, so updating a key already present returned nullptr --
+   which every caller reads as "table full" and drops the write. Now checked
+   only when a new slot is actually needed.
+
+2. **A corrupt stream passed the parse gate.** A zero-length frame silently
+   ended the parse, `truncated` was not incremented, and nothing verified the
+   whole file had been consumed -- so a 116-byte fixture with 2 of 3 messages
+   skipped reported `GATE: PASS` after reading 38 bytes. The gate now requires
+   `bytes unread == 0` and counts zero-length frames. The real full day does
+   consume all 8,251,407,909 bytes, so the published result was genuine; the
+   gate simply could not have told the difference.
+
+3. **`SpscRing` accepted a non-power-of-two capacity.** The wrap is a mask, not
+   a modulo, so any other value silently aliases slots. `OpenHashMap` already
+   rejected this; the ring now does too.
+
+4. **`extract_tape` leaked its routing index and ignored insert failures.**
+   Entries were retired on Delete and Replace but never when an order was fully
+   executed or fully cancelled, so the index grew all session: 4,270,459 entries
+   against a peak of 1,924,078 concurrently-live orders, a 2.2x leak. It stayed
+   under the load factor on this day (0.255), but a busier one would overflow --
+   and since `insert()`'s return value was discarded, the tapes would simply
+   have been missing events with nothing reporting it. Now retired on full
+   execution/cancel (index ends the day at **0 entries**, peak load 0.114,
+   matching `itch_stat`'s independent "still live at EOD: 0"), and an insert
+   failure is fatal.
+
+5. **`BookEvent` wrote uninitialised padding to disk.** The struct is 36 bytes
+   of fields padded to 40 and is `fwrite`-ed verbatim, so the same input
+   produced byte-different tape files -- 2,356 of 1,512,179 events on AAPL,
+   identical in every field. Padding is now explicit and zero-initialised, with
+   an `offsetof` assertion so it cannot come back. Tapes are byte-reproducible
+   across runs, and field bytes are unchanged from the pre-fix tapes, so every
+   published number stands.
+
+### And one hypothesis that was wrong
+
+Probing the queue model's strict-FIFO assumption found it violated on 1.3-4.5%
+of executions. The obvious correction -- require the executed order to be ahead
+of us before advancing the queue -- drops the fill count to **exactly zero** on
+every symbol. We join at the back, so once everything ahead is consumed the only
+orders left arrived after we did; the execution that legitimately reaches us is
+always one of those. The original unconditional logic was right. Reverted, and
+the genuinely suspicious case (an order behind us trading while volume still
+rests ahead) is now counted and reported instead: 73 on AAPL against 9,535
+fills, 0 on AMZN.
+
+---
+
 ## Remaining / not attempted
 
 Stated as gaps in the README rather than hidden: no network path or kernel

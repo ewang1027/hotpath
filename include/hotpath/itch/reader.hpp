@@ -23,6 +23,7 @@ struct ReaderStats {
   std::uint64_t unknown_type{0};      // type not in spec_length() table
   std::uint64_t length_mismatch{0};   // prefix disagreed with the spec table
   std::uint64_t truncated{0};         // file ended mid-message
+  std::uint64_t zero_length{0};       // 0-byte length prefix: stream stops here
   std::uint64_t per_type[256]{};
 };
 
@@ -37,7 +38,11 @@ public:
   [[nodiscard]] bool next(RawMessage& out) noexcept {
     if (__builtin_expect(cur_ + 2 > end_, 0)) return false;
     const std::uint16_t len = rd_u16(cur_);
-    if (__builtin_expect(len == 0, 0)) return false;          // end-of-file marker
+    // A zero length prefix terminates the stream. Nasdaq's files do not
+    // actually use one, so encountering it mid-file means corruption -- count
+    // it rather than treating it as a clean end, or a half-read file reports
+    // "no errors" having silently skipped everything after the zero.
+    if (__builtin_expect(len == 0, 0)) { ++stats_.zero_length; return false; }
     if (__builtin_expect(cur_ + 2 + len > end_, 0)) {         // truncated tail
       ++stats_.truncated;
       cur_ = end_;

@@ -2,6 +2,7 @@
 #include "hotpath/core/types.hpp"
 #include "hotpath/itch/symbol.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace hotpath::book {
@@ -34,9 +35,17 @@ struct BookEvent {
   Qty       shares;      // Add / Replace / Execute / Cancel
   EventType type;
   Side      side;        // Add only (Replace inherits the original's side)
-  std::uint16_t _pad{0};
+  // Padding is explicit and zero-initialised because these structs are written
+  // straight to disk with fwrite. Left implicit, the trailing bytes are
+  // indeterminate and the same input produces byte-different tape files --
+  // measured at 2,356 of 1,512,179 events on AAPL, identical in every field.
+  // That silently breaks any attempt to checksum or diff a tape.
+  std::uint16_t _pad0{0};
+  std::uint32_t _pad1{0};
 };
 static_assert(sizeof(BookEvent) == 40, "BookEvent layout changed; bump kTapeVersion");
+static_assert(offsetof(BookEvent, _pad0) == 34 && offsetof(BookEvent, _pad1) == 36,
+              "BookEvent has implicit padding again; it is written to disk verbatim");
 
 // On-disk tape header. The tape is this header followed by a flat array of
 // BookEvent, so a consumer can mmap it and cast straight to the array.

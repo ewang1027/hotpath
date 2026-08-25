@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <type_traits>
 
 namespace hotpath::ipc {
@@ -52,8 +53,13 @@ class SpscRing {
   static constexpr std::size_t kAlign = P == Padding::Padded ? kCacheLine : alignof(std::uint64_t);
 
 public:
+  // Capacity MUST be a power of two: the wrap is a mask, not a modulo, so any
+  // other value silently aliases slots instead of failing. OpenHashMap already
+  // rejects this; the ring did not.
   explicit SpscRing(std::size_t capacity_pow2)
-      : mask_(capacity_pow2 - 1),
+      : mask_((capacity_pow2 == 0 || (capacity_pow2 & (capacity_pow2 - 1)) != 0)
+                  ? throw std::invalid_argument("SpscRing capacity must be a power of two")
+                  : capacity_pow2 - 1),
         buf_(static_cast<T*>(::operator new[](capacity_pow2 * sizeof(T),
                                               std::align_val_t{kCacheLine}))) {
     // Zero the storage: the litmus tests rely on an unwritten slot being
