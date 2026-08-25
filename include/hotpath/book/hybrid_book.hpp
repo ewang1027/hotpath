@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <stdexcept>
 #include <vector>
 
 namespace hotpath::book {
@@ -62,7 +63,11 @@ public:
              std::size_t max_orders_pow2 = 1u << 21,
              std::size_t max_levels = 1u << 20)
       : lo_(lo - (lo % kTick)),
-        ticks_(static_cast<std::size_t>((hi - (lo - (lo % kTick))) / kTick) + 1),
+        // hi < lo would underflow this unsigned subtraction into ~42M ticks and
+        // silently allocate hundreds of MB of grid rather than failing.
+        ticks_(hi < lo - (lo % kTick)
+                   ? throw std::invalid_argument("HybridBook: price window is inverted")
+                   : static_cast<std::size_t>((hi - (lo - (lo % kTick))) / kTick) + 1),
         ids_(max_orders_pow2) {
     orders_.resize(max_orders_pow2);
     levels_.resize(max_levels);

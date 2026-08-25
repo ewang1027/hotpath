@@ -38,10 +38,7 @@ public:
     ::madvise(const_cast<void*>(p), size_, MADV_SEQUENTIAL);
   }
 
-  ~MappedFile() {
-    if (data_) ::munmap(const_cast<std::uint8_t*>(data_), size_);
-    if (fd_ >= 0) ::close(fd_);
-  }
+  ~MappedFile() { release(); }
 
   MappedFile(const MappedFile&) = delete;
   MappedFile& operator=(const MappedFile&) = delete;
@@ -49,7 +46,11 @@ public:
       : data_(o.data_), size_(o.size_), fd_(o.fd_) { o.data_ = nullptr; o.size_ = 0; o.fd_ = -1; }
   MappedFile& operator=(MappedFile&& o) noexcept {
     if (this != &o) {
-      this->~MappedFile();
+      // release(), not an explicit destructor call: invoking ~MappedFile()
+      // here ends the object's lifetime, and everything after it is touching a
+      // dead object. It happens to work for a type this trivial, which is
+      // exactly why it survives both review and the sanitizers.
+      release();
       data_ = o.data_; size_ = o.size_; fd_ = o.fd_;
       o.data_ = nullptr; o.size_ = 0; o.fd_ = -1;
     }
@@ -61,6 +62,12 @@ public:
   [[nodiscard]] bool valid() const noexcept { return data_ != nullptr; }
 
 private:
+  void release() noexcept {
+    if (data_) ::munmap(const_cast<std::uint8_t*>(data_), size_);
+    if (fd_ >= 0) ::close(fd_);
+    data_ = nullptr; size_ = 0; fd_ = -1;
+  }
+
   const std::uint8_t* data_{nullptr};
   std::size_t size_{0};
   int fd_{-1};

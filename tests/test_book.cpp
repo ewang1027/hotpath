@@ -176,3 +176,12 @@ TEST_CASE("book: three designs agree under a random workload", "[book][crossval]
   REQUIRE(c.rejected() == 0);
   REQUIRE(d.rejected() == 0);
 }
+
+// Regression: `hi - lo` is unsigned, so an inverted window underflowed to ~42M
+// ticks and silently allocated hundreds of MB of grid instead of failing.
+TEST_CASE("book: grid designs reject an inverted price window", "[book]") {
+  REQUIRE_THROWS(FlatBook(1100000, 900000));
+  REQUIRE_THROWS(HybridBook(1100000, 900000));
+  REQUIRE_NOTHROW(FlatBook(900000, 1100000));
+  REQUIRE_NOTHROW(HybridBook(900000, 1100000));
+}

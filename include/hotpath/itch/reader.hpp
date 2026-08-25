@@ -38,11 +38,19 @@ public:
   [[nodiscard]] bool next(RawMessage& out) noexcept {
     if (__builtin_expect(cur_ + 2 > end_, 0)) return false;
     const std::uint16_t len = rd_u16(cur_);
-    // A zero length prefix terminates the stream. Nasdaq's files do not
-    // actually use one, so encountering it mid-file means corruption -- count
-    // it rather than treating it as a clean end, or a half-read file reports
+    // A zero-length prefix terminates the stream. As the LAST two bytes of the
+    // file that is a legitimate end-of-file marker; anywhere else it is
+    // corruption, and treating it as a clean end lets a half-read file report
     // "no errors" having silently skipped everything after the zero.
-    if (__builtin_expect(len == 0, 0)) { ++stats_.zero_length; return false; }
+    //
+    // The distinction matters in both directions: without it a corrupt file
+    // passes, and without the terminator case a perfectly good file that ends
+    // with one fails the whole-file-consumed check by exactly two bytes.
+    if (__builtin_expect(len == 0, 0)) {
+      if (cur_ + 2 == end_) { cur_ = end_; stats_.bytes += 2; }  // clean terminator
+      else ++stats_.zero_length;
+      return false;
+    }
     if (__builtin_expect(cur_ + 2 + len > end_, 0)) {         // truncated tail
       ++stats_.truncated;
       cur_ = end_;

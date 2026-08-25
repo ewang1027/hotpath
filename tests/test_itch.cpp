@@ -204,3 +204,41 @@ TEST_CASE("instrumentation actually counts", "[invariant]") {
     REQUIRE(s.delta().syscalls >= 1);
   }
 }
+
+// A zero-length frame is a legitimate end-of-file marker as the last two bytes
+// of the file, and corruption anywhere else. Both directions matter: without
+// the corruption case a half-read file reports no errors, and without the
+// terminator case a well-formed file fails the whole-file-consumed check by
+// exactly two bytes.
+TEST_CASE("itch: zero-length frame -- terminator vs corruption", "[itch]") {
+  ItchBuilder b;
+  b.add_order(1, Side::Buy, 100, "AAPL", 1000000);
+  b.order_delete(1);
+
+  SECTION("as the final two bytes it is a clean terminator") {
+    auto bytes = b.bytes();
+    bytes.push_back(0); bytes.push_back(0);
+    Reader r(bytes.data(), bytes.size());
+    RawMessage m{};
+    int n = 0;
+    while (r.next(m)) ++n;
+    REQUIRE(n == 2);
+    REQUIRE(r.stats().zero_length == 0);
+    REQUIRE(r.stats().bytes == bytes.size());   // whole file accounted for
+  }
+
+  SECTION("mid-stream it is corruption and the tail is not silently dropped") {
+    auto bytes = b.bytes();
+    const std::size_t cut = bytes.size();
+    bytes.push_back(0); bytes.push_back(0);
+    for (unsigned char c : b.bytes()) bytes.push_back(c);   // more valid messages after
+    Reader r(bytes.data(), bytes.size());
+    RawMessage m{};
+    int n = 0;
+    while (r.next(m)) ++n;
+    REQUIRE(n == 2);                            // stopped at the zero
+    REQUIRE(r.stats().zero_length == 1);
+    REQUIRE(r.stats().bytes == cut);            // and reports what it did NOT read
+    REQUIRE(r.stats().bytes < bytes.size());
+  }
+}

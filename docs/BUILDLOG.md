@@ -370,6 +370,37 @@ bugs, none of which any test was failing on.
    across runs, and field bytes are unchanged from the pre-fix tapes, so every
    published number stands.
 
+### Three more, found by continuing to look
+
+6. **My own zero-length fix could reject a well-formed file.** A zero-length
+   frame as the *last two bytes* is a legitimate end-of-file marker; only
+   mid-file is it corruption. Without the distinction a file that ends with one
+   would fail the new whole-file-consumed check by exactly two bytes. Both
+   directions are now tested.
+
+7. **`FlatBook`/`HybridBook` accepted an inverted price window.** `hi - lo` is
+   unsigned, so `hi < lo` underflowed to ~42M ticks and silently allocated
+   hundreds of MB of grid instead of failing. Not reachable from
+   `Tape::price_window`, but a public constructor should not be a landmine.
+
+8. **`MappedFile::operator=(MappedFile&&)` called its own destructor** and then
+   kept using the object -- its lifetime had ended. It works for a type this
+   trivial, which is exactly why it survives review and every sanitizer.
+   Replaced with an explicit `release()`.
+
+### And the regression gate, loosened for a third time
+
+SPY and INTC kept flapping against the speedup floor (observed ranges: SPY
+1.96-2.32, INTC 1.98-2.69). It now uses per-symbol floors at ~80% of the
+observed minimum, sampled best-of-two, because between-process variance here is
+far wider than the within-process confidence interval.
+
+That this gate has needed loosening three times is itself the finding, and the
+same one `METHODOLOGY.md` argues: a laptop running a desktop cannot support a
+tight performance bound. What the gate still catches is the thing worth
+catching -- the hybrid design regressing toward the baseline it exists to beat,
+which would collapse the ratios toward 1.0 rather than shave 15% off them.
+
 ### And one hypothesis that was wrong
 
 Probing the queue model's strict-FIFO assumption found it violated on 1.3-4.5%
