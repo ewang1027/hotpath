@@ -52,6 +52,33 @@ module itch_parse (
 
   localparam int HEADER_LEN = 11;
 
+  // Per-type body length from the ITCH 5.0 spec; 0 means "type not known to
+  // this build". Used to validate, never to advance -- the frame prefix drives
+  // iteration so an unrecognised or newly-added type is skipped cleanly rather
+  // than desynchronising the stream.
+  //
+  // Checking only the 11-byte common header is not enough. A 20-byte body
+  // claiming to be an Add never receives bytes 32..35, so its price would be
+  // whatever the accumulator last held. The C++ parser rejects these; without
+  // this the two implementations disagree, which the differential fuzzer finds
+  // within a few thousand inputs.
+  function automatic logic [15:0] spec_length(input logic [7:0] t);
+    case (t)
+      "S": spec_length = 16'd12;  "R": spec_length = 16'd39;
+      "H": spec_length = 16'd25;  "Y": spec_length = 16'd20;
+      "L": spec_length = 16'd26;  "V": spec_length = 16'd35;
+      "W": spec_length = 16'd12;  "K": spec_length = 16'd28;
+      "J": spec_length = 16'd35;  "h": spec_length = 16'd21;
+      "A": spec_length = 16'd36;  "F": spec_length = 16'd40;
+      "E": spec_length = 16'd31;  "C": spec_length = 16'd36;
+      "X": spec_length = 16'd23;  "D": spec_length = 16'd19;
+      "U": spec_length = 16'd35;  "P": spec_length = 16'd44;
+      "Q": spec_length = 16'd40;  "B": spec_length = 16'd19;
+      "I": spec_length = 16'd50;  "N": spec_length = 16'd20;
+      default: spec_length = 16'd0;
+    endcase
+  endfunction
+
   logic [15:0] len;      // body length from the frame prefix
   logic [15:0] cnt;      // byte offset within the body
 
@@ -149,7 +176,8 @@ module itch_parse (
               state      <= S_LEN_HI;
               emit       <= 1'b1;
               emit_len   <= len;
-              emit_short <= (len < HEADER_LEN[15:0]);
+              emit_short <= (len < HEADER_LEN[15:0]) ||
+                            ((spec_length(m_type) != 16'd0) && (len < spec_length(m_type)));
             end
             cnt <= cnt + 16'd1;
           end
@@ -193,6 +221,40 @@ module itch_parse (
       end
     end
   end
+
+  // ---------------------------------------------------------------------------
+  // Assertions.
+  //
+  // Output comparison against the C++ reference catches wrong answers; these
+  // catch a wrong internal state that happens to produce a right answer, which
+  // is the failure mode that survives a differential test and reappears later
+  // on different input.
+  // ---------------------------------------------------------------------------
+`ifdef HOTPATH_ASSERT
+  // The byte counter must never run past the body it is counting through.
+  a_cnt_in_range: assert property (@(posedge clk) disable iff (rst)
+      (state == S_BODY && s_valid) |-> (cnt < len));
+
+  // Nothing may be emitted that was too short to contain what it claims.
+  a_valid_implies_long_enough: assert property (@(posedge clk) disable iff (rst)
+      m_valid |-> (m_length >= HEADER_LEN[15:0]));
+
+  // A message is either decoded or rejected, never both.
+  a_valid_xor_short: assert property (@(posedge clk) disable iff (rst)
+      not (m_valid && e_short));
+
+  // Every strobe is exactly one cycle: a consumer that latches on a level
+  // rather than an edge would otherwise double-count.
+  a_valid_one_cycle: assert property (@(posedge clk) disable iff (rst)
+      m_valid |=> !m_valid);
+  a_short_one_cycle: assert property (@(posedge clk) disable iff (rst)
+      e_short |=> !e_short);
+
+  // The emit arm always resolves on the very next cycle -- it must not linger
+  // and re-fire against a later message's accumulators.
+  a_emit_resolves: assert property (@(posedge clk) disable iff (rst)
+      emit |=> !emit);
+`endif
 
 endmodule
 

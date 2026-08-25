@@ -14,6 +14,7 @@
 #include "verilated.h"
 
 #include "fixture.hpp"
+#include "fuzz_core.hpp"
 #include "hotpath/itch/mapped_file.hpp"
 #include "hotpath/itch/reader.hpp"
 
@@ -93,7 +94,9 @@ RtlRun run_rtl(Vitch_parse& dut, const std::vector<std::uint8_t>& bytes) {
 }
 
 // The same stream through the C++ parser, decoded into the same shape.
-std::vector<Decoded> run_cpp(const std::vector<std::uint8_t>& bytes) {
+// `stats_out` (optional) receives the reference's view of the stream.
+std::vector<Decoded> run_cpp(const std::vector<std::uint8_t>& bytes,
+                             ReaderStats* stats_out = nullptr) {
   std::vector<Decoded> out;
   Reader rd(bytes.data(), bytes.size());
   RawMessage m{};
@@ -142,6 +145,7 @@ std::vector<Decoded> run_cpp(const std::vector<std::uint8_t>& bytes) {
     }
     out.push_back(d);
   }
+  if (stats_out) *stats_out = rd.stats();
   return out;
 }
 
@@ -181,10 +185,12 @@ int main(int argc, char** argv) {
   int fail = 0;
   std::string real_file;
   std::size_t real_bytes = 4u << 20;
+  int fuzz_iters = 2000;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     if (a == "--file" && i + 1 < argc) real_file = argv[++i];
     else if (a == "--bytes" && i + 1 < argc) real_bytes = std::strtoull(argv[++i], nullptr, 10);
+    else if (a == "--fuzz" && i + 1 < argc) fuzz_iters = std::atoi(argv[++i]);
   }
 
   std::printf("ITCH parser co-simulation: SystemVerilog vs C++\n\n");
@@ -253,6 +259,68 @@ int main(int argc, char** argv) {
     } else {
       fail |= compare(r.msgs, c, "malformed input");
     }
+  }
+
+  // ---- 3b. differential fuzzing: RTL against the C++ golden model ----
+  //
+  // The same generators the software fuzz targets use (tests/fuzz_core.hpp),
+  // pointed at the hardware. This is what a verification team does with a
+  // reference model, and it is stronger than either side alone: a shared
+  // misreading of the spec cannot hide, because the two implementations were
+  // written in different languages against different mental models.
+  if (fuzz_iters > 0) {
+    std::printf("\n  fuzzing RTL vs C++ over %d generated inputs\n", fuzz_iters);
+    std::uint64_t total_bytes = 0, total_msgs = 0, total_short = 0, mismatches = 0;
+    for (int i = 0; i < fuzz_iters && mismatches < 5; ++i) {
+      hotpath::fuzz::Rng r(0xF0F0F0F0ull + static_cast<std::uint64_t>(i) * 0x9E3779B97F4A7C15ull);
+      std::vector<std::uint8_t> input =
+          (r.next() & 1) ? hotpath::fuzz::random_bytes(r, r.below(400) + 1)
+                         : hotpath::fuzz::mutated_itch(r, 1 + r.below(20));
+      if (input.empty()) continue;
+
+      // Compare over the prefix the REFERENCE actually parsed. The two stop for
+      // different reasons on a malformed stream -- C++ halts at a zero-length
+      // frame, the RTL resynchronises past it -- and that is a difference in
+      // recovery policy, not in decoding. Feeding both exactly what the
+      // reference consumed isolates the decode.
+      ReaderStats st{};
+      const auto cpp_msgs = run_cpp(input, &st);
+      if (st.bytes == 0 || st.bytes > input.size()) continue;
+      input.resize(static_cast<std::size_t>(st.bytes));
+
+      const auto r_rtl = run_rtl(dut, input);
+      total_bytes += input.size();
+      total_msgs += r_rtl.msgs.size();
+      total_short += r_rtl.shorts;
+
+      bool bad = false;
+      if (r_rtl.msgs.size() != cpp_msgs.size()) bad = true;
+      else for (std::size_t k = 0; k < r_rtl.msgs.size() && !bad; ++k) {
+        const Decoded& a = r_rtl.msgs[k];
+        const Decoded& b = cpp_msgs[k];
+        bad = a.type != b.type || a.length != b.length || a.locate != b.locate ||
+              a.timestamp != b.timestamp || a.order_ref != b.order_ref ||
+              a.new_ref != b.new_ref || a.shares != b.shares ||
+              a.price != b.price || a.side_buy != b.side_buy ||
+              a.book_event != b.book_event;
+      }
+      // Both must also agree on what they REJECTED, not merely on what they
+      // accepted: a parser that quietly emits an under-length message is the
+      // exact bug that produced two out-of-bounds reads on the C++ side.
+      if (!bad && r_rtl.shorts != st.short_message) bad = true;
+
+      if (bad) {
+        ++mismatches;
+        std::printf("    MISMATCH on input %d (%zu bytes): rtl %zu msgs / %" PRIu64
+                    " short, c++ %zu msgs / %" PRIu64 " short\n",
+                    i, input.size(), r_rtl.msgs.size(), r_rtl.shorts,
+                    cpp_msgs.size(), st.short_message);
+      }
+    }
+    std::printf("  %-22s %d inputs, %" PRIu64 " bytes, %" PRIu64 " messages, %"
+                PRIu64 " rejected, %" PRIu64 " mismatches\n",
+                "RTL fuzz", fuzz_iters, total_bytes, total_msgs, total_short, mismatches);
+    if (mismatches) fail = 1;
   }
 
   // ---- 4. real NASDAQ bytes ----

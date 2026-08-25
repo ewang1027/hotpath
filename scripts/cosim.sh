@@ -18,18 +18,27 @@ RAW="$DATA_DIR/${DAY}.NASDAQ_ITCH50"
 
 command -v verilator >/dev/null || { echo "verilator not found: brew install verilator" >&2; exit 1; }
 
-echo "== lint (-Wall, warnings are errors) =="
-verilator --lint-only -Wall -Wno-fatal rtl/itch_parse.sv
+echo "== lint (-Wall) =="
+verilator --lint-only -Wall -DHOTPATH_ASSERT rtl/itch_parse.sv
 echo "clean"
 
 echo; echo "== build =="
-verilator --cc rtl/itch_parse.sv --exe ../rtl/tb_itch_parse.cpp \
+# Rebuild from scratch whenever a source is newer than the binary. Verilator's
+# incremental build did not always pick up an edited .sv here, which is worse
+# than slow: a validation run that silently exercises the previous RTL will
+# happily report PASS on code that no longer exists.
+if [[ ! -x build-rtl/tb_itch_parse ]] \
+   || [[ -n "$(find rtl -newer build-rtl/tb_itch_parse -name '*.sv' -o -newer build-rtl/tb_itch_parse -name '*.cpp' 2>/dev/null)" ]]; then
+  rm -rf build-rtl
+fi
+verilator --cc rtl/itch_parse.sv --exe ../rtl/tb_itch_parse.cpp --assert -DHOTPATH_ASSERT \
   -CFLAGS "-std=c++20 -O2 -I$PWD/include -I$PWD/tests" \
   --Mdir build-rtl --build -o tb_itch_parse >/dev/null
 
 echo; echo "== co-simulate =="
+FUZZ="${FUZZ:-5000}"
 if [[ "$BYTES" != "0" && -s "$RAW" ]]; then
-  ./build-rtl/tb_itch_parse --file "$RAW" --bytes "$BYTES"
+  ./build-rtl/tb_itch_parse --fuzz "$FUZZ" --file "$RAW" --bytes "$BYTES"
 else
-  ./build-rtl/tb_itch_parse
+  ./build-rtl/tb_itch_parse --fuzz "$FUZZ"
 fi

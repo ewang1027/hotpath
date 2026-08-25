@@ -6,9 +6,15 @@ co-simulated against the C++ parser in `include/hotpath/itch/` under Verilator,
 and the gate is that every decoded field matches on the same input.
 
 ```
-./scripts/cosim.sh              # synthetic streams
-./scripts/cosim.sh 60000000     # plus 60 MB of real NASDAQ data
+./scripts/cosim.sh                        # synthetic + 5000 fuzzed inputs
+FUZZ=20000 ./scripts/cosim.sh 60000000    # plus 60 MB of real NASDAQ data
 ```
+
+The script rebuilds from scratch whenever a source is newer than the binary.
+Verilator's incremental build did not reliably pick up an edited `.sv` here, and
+a validation run that silently exercises the *previous* RTL will report PASS on
+code that no longer exists — which happened once during this work and is worth
+more caution than the three seconds it costs.
 
 ## Result
 
@@ -16,12 +22,58 @@ and the gate is that every decoded field matches on the same input.
 one of each type       7 messages, every field identical
 4000 random messages   4000 messages, every field identical
 malformed input        rtl e_short=2, rtl decoded=2, c++ decoded=2
+RTL fuzz               20000 inputs, 1865896 bytes, 65204 messages, 693 rejected, 0 mismatches
 real NASDAQ ITCH       2057603 messages, every field identical
 CO-SIMULATION: PASS
 ```
 
 **2,057,603 real messages decoded identically by two independent
-implementations, one of them hardware.** Lint is clean under `-Wall`.
+implementations, one of them hardware**, plus 65,204 more from 20,000 fuzzed
+inputs. Lint is clean under `-Wall`, and the assertions below are enabled
+throughout.
+
+## Differential fuzzing against the golden model
+
+The generators are the same ones the software fuzz targets use
+(`tests/fuzz_core.hpp`), pointed at the hardware. This is what a verification
+team does with a reference model, and it is stronger than fuzzing either side
+alone: a shared misreading of the spec cannot hide, because the two
+implementations were written in different languages against different mental
+models of the same document.
+
+Both sides must agree on what they **rejected**, not merely on what they
+accepted. A parser that quietly emits an under-length message is precisely the
+bug that produced two heap-buffer-overflows on the C++ side, and comparing only
+successful decodes would miss it entirely. The run above rejects 693 inputs and
+the two agree on every one.
+
+One design point the comparison forced: the two stop for *different reasons* on
+a malformed stream — C++ halts at a zero-length frame, the RTL resynchronises
+past it. That is a difference in recovery policy, not in decoding, so the
+comparison is made over the prefix the reference actually consumed. Conflating
+the two would have produced a stream of false mismatches that say nothing about
+whether the fields decode correctly.
+
+**The fuzzer was validated against a real bug**, the same discipline the
+software campaign uses: reverting the per-type length check makes it fail within
+85 inputs, with the RTL emitting messages the C++ side rejects as short.
+Restoring it passes.
+
+## Assertions
+
+Output comparison catches wrong answers. Assertions catch a wrong *internal
+state* that happens to produce a right answer — the failure mode that survives
+a differential test and reappears later on different input.
+
+| assertion | what it pins |
+|---|---|
+| `a_cnt_in_range` | the byte counter never runs past the body it is counting through |
+| `a_valid_implies_long_enough` | nothing is emitted that was too short to contain what it claims |
+| `a_valid_xor_short` | a message is either decoded or rejected, never both |
+| `a_valid_one_cycle` / `a_short_one_cycle` | every strobe is exactly one cycle, so a consumer latching on a level cannot double-count |
+| `a_emit_resolves` | the emit arm always resolves next cycle and cannot linger to re-fire against a later message's accumulators |
+
+Built with `--assert -DHOTPATH_ASSERT`; none fired across the full run above.
 
 This is the same argument the four order book designs make — two independent
 implementations agreeing over a large input is evidence that neither is wrong in
@@ -48,7 +100,7 @@ sidesteps the question by not having a tail in the first place.
 **Decode latency: 1 cycle after the final byte of a message.** Not "about one" —
 exactly one, deterministically, and the co-simulation would fail if it were not.
 
-## Two bugs the co-simulation caught
+## Three bugs the co-simulation caught
 
 Both are RTL-specific, and both would have been extremely unpleasant to find any
 other way.
@@ -70,6 +122,17 @@ short by one byte. The co-simulation flagged it on the first message; in
 isolation this looks like a byte-order problem and gets "fixed" in the wrong
 place. The parser now emits one cycle after the last byte, which is where the
 deterministic 1-cycle latency above comes from.
+
+### Validating only the common header, not the per-type length
+
+The RTL initially rejected only bodies shorter than the 11-byte common header.
+The C++ parser goes further and rejects a body shorter than its *type's* spec
+length — a 20-byte message claiming to be an Add never receives bytes 32–35, so
+its price would be whatever the accumulator last held.
+
+The differential fuzzer found the disagreement within a hundred inputs. The RTL
+now carries the same spec-length table and applies the same rule, so the two
+reject identically rather than merely accepting identically.
 
 ### Emitting stale flops for fields the message does not have
 

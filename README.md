@@ -83,9 +83,12 @@ accumulator in the same cycle that fills it (nonblocking assignments update at
 the end of the timestep, so every price came out a byte short), and emitting
 **stale flops** for fields a short message never carried — the RTL analogue of
 reading uninitialised memory, except no sanitizer can see a register that was
-never written. Decode latency is exactly 1 cycle after the final byte, which is
-the tail behaviour the software side of this repo cannot even measure.
-[Details](docs/RTL.md)
+never written. It is also **differentially fuzzed against the C++ golden model** — 20,000
+generated inputs, with both sides required to agree on what they *rejected*, not
+just what they accepted — and carries SystemVerilog assertions for the internal
+invariants that output comparison cannot see. Decode latency is exactly 1 cycle
+after the final byte, which is the tail behaviour the software side of this repo
+cannot even measure. [Details](docs/RTL.md)
 
 **Market data needs a ring that drops messages, not one that blocks.** The
 cross-process `ShmRing` never stalls the publisher — you cannot backpressure an
@@ -116,7 +119,7 @@ which is what makes this class of bug so dangerous.
 | Syscalls in steady state | **0** (enforced by dyld `__interpose`) |
 | ThreadSanitizer / ASan+UBSan | clean |
 | Fuzzing: ITCH parser + four-way book differential, under ASan | 550,000 iterations / 566 MB, 0 failures |
-| SystemVerilog parser vs C++ parser, every decoded field | **2,057,603** real messages, 0 mismatches |
+| SystemVerilog parser vs C++ parser, every decoded field | **2,057,603** real messages + 65,204 fuzzed, 0 mismatches |
 
 The cross-validation is not ceremony: it caught the intrusive book *silently
 dropping orders* when its level pool filled, which left the book permanently
