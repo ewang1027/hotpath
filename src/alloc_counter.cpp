@@ -76,13 +76,22 @@ void operator delete(void* p, std::size_t, std::align_val_t a) noexcept { ::oper
 void operator delete[](void* p, std::size_t, std::align_val_t a) noexcept { ::operator delete(p, a); }
 
 // ---------------------------------------------------------------------------
-// Syscall counting via dyld interposition.
+// Syscall counting.
+//
+// The mechanism is completely different on the two platforms, which is most of
+// why this file needs a porting layer at all.
 //
 // macOS has no LD_PRELOAD, but dyld honours a __DATA,__interpose section that
-// swaps a libSystem symbol for ours process-wide. This catches the calls a
-// replay loop might accidentally make (a stray read(), an mmap() growing a
-// buffer) without needing dtruss or root.
+// swaps a libSystem symbol for ours process-wide. It is silently ignored when
+// the instrumentation is a static archive, which is why hotpath_instrument is
+// built SHARED (see docs/BUILDLOG.md).
+//
+// Linux is simpler: a definition in a shared object that precedes libc in the
+// link order preempts the libc symbol for the whole process, with no special
+// section. Reaching the real function then needs dlsym(RTLD_NEXT), which is the
+// only extra machinery.
 // ---------------------------------------------------------------------------
+#if defined(__APPLE__)
 namespace {
 
 struct Interpose { const void* replacement; const void* replacee; };
@@ -107,6 +116,42 @@ HOTPATH_INTERPOSE(hp_madvise, madvise)
 HOTPATH_INTERPOSE(hp_close, close)
 
 } // namespace
+
+#else   // Linux
+
+#include <dlfcn.h>
+
+namespace {
+// Resolved lazily rather than in a constructor: this object may be interposing
+// calls made before its own static initialisers have run.
+template <typename Fn>
+inline Fn real(Fn& cache, const char* name) noexcept {
+  if (!cache) cache = reinterpret_cast<Fn>(::dlsym(RTLD_NEXT, name));
+  return cache;
+}
+using read_fn    = ssize_t (*)(int, void*, size_t);
+using write_fn   = ssize_t (*)(int, const void*, size_t);
+using mmap_fn    = void*   (*)(void*, size_t, int, int, int, off_t);
+using munmap_fn  = int     (*)(void*, size_t);
+using madvise_fn = int     (*)(void*, size_t, int);
+using close_fn   = int     (*)(int);
+read_fn    g_read{};
+write_fn   g_write{};
+mmap_fn    g_mmap{};
+munmap_fn  g_munmap{};
+madvise_fn g_madvise{};
+close_fn   g_close{};
+} // namespace
+
+extern "C" {
+ssize_t read(int fd, void* buf, size_t n) { bump_syscall(); return real(g_read, "read")(fd, buf, n); }
+ssize_t write(int fd, const void* buf, size_t n) { bump_syscall(); return real(g_write, "write")(fd, buf, n); }
+void*   mmap(void* a, size_t l, int p, int f, int fd, off_t o) { bump_syscall(); return real(g_mmap, "mmap")(a, l, p, f, fd, o); }
+int     munmap(void* a, size_t l) { bump_syscall(); return real(g_munmap, "munmap")(a, l); }
+int     madvise(void* a, size_t l, int adv) { bump_syscall(); return real(g_madvise, "madvise")(a, l, adv); }
+int     close(int fd) { bump_syscall(); return real(g_close, "close")(fd); }
+}
+#endif
 
 namespace hotpath::bench {
 

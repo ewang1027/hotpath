@@ -42,6 +42,13 @@ target_compile_options(hotpath INTERFACE ${HOTPATH_WARNINGS})
 #      from a static archive it is accepted and silently ignored, leaving the
 #      counter reading zero forever. Verified by syscall_counting_active(). ----
 add_library(hotpath_instrument SHARED src/alloc_counter.cpp)
+if(NOT APPLE)
+  # Linux reaches the real libc entry points through dlsym(RTLD_NEXT), and
+  # sched_setaffinity/CPU_SET need the GNU extensions.
+  target_link_libraries(hotpath_instrument PUBLIC ${CMAKE_DL_LIBS})
+  target_compile_definitions(hotpath INTERFACE _GNU_SOURCE)
+  target_compile_definitions(hotpath_instrument PRIVATE _GNU_SOURCE)
+endif()
 target_include_directories(hotpath_instrument PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_options(hotpath_instrument PRIVATE ${HOTPATH_WARNINGS})
 

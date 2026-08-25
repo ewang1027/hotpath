@@ -1,0 +1,16 @@
+# Reproducible Linux build of hotpath.
+#
+# The repo is developed on macOS/arm64, where the clock ticks at 41.7 ns and the
+# OS ignores thread affinity. Linux has a nanosecond clock and real core pinning,
+# which is where the tail-latency measurements this repo currently declines to
+# publish become possible. This image is how the Linux half of the port is
+# verified without needing a second machine. See docs/PORTING.md.
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake ninja-build git ca-certificates \
+      clang lld python3 \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+ENV CMAKE_GENERATOR=Ninja

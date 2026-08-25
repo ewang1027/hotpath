@@ -1,6 +1,7 @@
 build/
 build-*/
 build-rtl/
+build-linux/
 data/
 *.gz
 *.NASDAQ_ITCH50

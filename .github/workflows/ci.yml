@@ -47,6 +47,35 @@ jobs:
       - name: Fuzz campaign
         run: ./build/tests/fuzz_campaign --iterations 20000 --seed ${{ github.run_number }}
 
+  # Linux build. The repo is developed on macOS, and every platform difference
+  # sits behind four #ifdefs (docs/PORTING.md) -- which rot silently unless
+  # something builds the other side. x86-64 here is also the only place the
+  # memory-ordering litmus can be checked against a TSO machine.
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            flags: "-DCMAKE_BUILD_TYPE=Release"
+          - name: asan-ubsan
+            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOTPATH_ASAN=ON"
+    name: linux-${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - run: cmake -S . -B build -G Ninja ${{ matrix.flags }}
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - name: Environment (clock resolution differs from macOS by ~40x)
+        run: ./build/src/hotpath_env
+      - name: Memory ordering on x86-64 TSO
+        # On arm64 the relaxed ring reports thousands of violations. On x86 it
+        # should report zero -- the claim litmus_ring makes but cannot check on
+        # a single machine.
+        run: ./build/src/litmus_ring --rounds 10
+
   # RTL co-simulation. Separate job because Verilator is the repo's only
   # non-C++ dependency and the rest of the build must not require it.
   cosim:

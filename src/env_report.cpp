@@ -16,15 +16,18 @@ int main() {
   std::printf("== hotpath environment report ==\n\n");
   std::printf("cache line (OS)        : %zu bytes\n", info.cache_line);
   std::printf("cache line (compiled)  : %zu bytes  %s\n", kCacheLine,
-              cache_line_matches_os() ? "[match]" : "[MISMATCH -- padding is wrong]");
+              cache_line_matches_os() ? "[exact]"
+              : cache_line_covers_os() ? "[covers it -- over-padded, harmless]"
+                                       : "[UNDER-PADDED -- false sharing remains]");
   std::printf("page size              : %zu bytes\n", info.page_size);
   std::printf("performance cores      : %zu\n", info.perf_cores);
   std::printf("efficiency cores       : %zu\n", info.efficiency_cores);
   std::printf("L1d / L2               : %zu / %zu bytes\n", info.l1d_bytes, info.l2_bytes);
+  std::printf("affinity               : %s\n", affinity_mechanism());
   std::printf("\n-- timebase --\n");
-  std::printf("mach_timebase_info     : numer=%u denom=%u\n", tb.numer(), tb.denom());
-  std::printf("resolution             : %.4f ns/tick (%.3f MHz)\n",
-              tb.ns_per_tick(), 1000.0 / tb.ns_per_tick());
+  std::printf("clock source           : %s\n", tb.source());
+  std::printf("nominal tick           : %.4f ns (numer=%u denom=%u)\n",
+              tb.ns_per_tick(), tb.numer(), tb.denom());
 
   // Demonstrate the quantisation problem rather than merely asserting it.
   constexpr int kProbe = 200000;
@@ -41,9 +44,21 @@ int main() {
               100.0 * zeros / kProbe, zeros, kProbe);
   std::printf("smallest non-zero delta: %llu ticks (%.2f ns)\n",
               (unsigned long long)best, ticks_to_ns(best));
-  std::printf("\n=> per-event latency below ~%.0f ns is NOT measurable here.\n",
-              tb.ns_per_tick());
-  std::printf("   See docs/METHODOLOGY.md for what this repo claims instead.\n");
+  // The nominal tick is not the binding constraint -- what the clock actually
+  // resolves is. On macOS/arm64 the two agree at 41.7 ns. On Linux the nominal
+  // tick is 1 ns but a virtualised clocksource can still land far above that,
+  // so report the measured figure and let it speak.
+  const double measured = ticks_to_ns(best);
+  std::printf("\n=> effective resolution is %.1f ns (nominal %.1f).\n",
+              measured, tb.ns_per_tick());
+  if (measured > 10.0) {
+    std::printf("   Per-event latency below that is NOT measurable here; this repo\n");
+    std::printf("   reports amortised cost, ratios and clock-free invariants instead.\n");
+    std::printf("   See docs/METHODOLOGY.md.\n");
+  } else {
+    std::printf("   Fine enough for per-event tail distributions -- the measurement\n");
+    std::printf("   docs/METHODOLOGY.md declines to make on Apple Silicon.\n");
+  }
 
   std::printf("\n-- instrumentation --\n");
   std::printf("counters linked        : %s\n",
@@ -52,7 +67,7 @@ int main() {
   std::printf("startup allocations    : %llu (%llu bytes)\n",
               (unsigned long long)c.allocations, (unsigned long long)c.bytes_allocated);
   std::printf("startup syscalls       : %llu\n", (unsigned long long)c.syscalls);
-  std::printf("qos -> performance     : %s\n",
-              request_performance_cores() ? "requested" : "failed");
+  std::printf("affinity request       : %s (%s)\n",
+              request_performance_cores() ? "ok" : "failed", affinity_mechanism());
   return 0;
 }

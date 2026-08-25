@@ -11,11 +11,14 @@
 using namespace hotpath;
 using namespace hotpath::ipc;
 
-TEST_CASE("ring: compile-time cache line matches the OS", "[ring]") {
-  // Every alignas() in the ring pads to kCacheLine. If that constant disagrees
-  // with the hardware, the padding is to the wrong boundary and the
-  // false-sharing experiment silently measures nothing.
-  REQUIRE(cache_line_matches_os());
+TEST_CASE("ring: compile-time cache line covers the real one", "[ring]") {
+  // Every alignas() in the ring pads to kCacheLine. Under-padding leaves the
+  // structures still sharing a line, which is the actual bug; over-padding only
+  // wastes space. The check is therefore >=, which also lets the same source
+  // build correctly on 64-byte x86 lines and 128-byte Apple Silicon ones.
+  INFO("compiled kCacheLine=" << kCacheLine
+       << " os=" << PlatformInfo::query().cache_line);
+  REQUIRE(cache_line_covers_os());
 }
 
 TEST_CASE("ring: single-threaded push/pop semantics", "[ring]") {

@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
 
   const auto info = PlatformInfo::query();
   std::printf("cache line (OS/compiled) : %zu / %zu %s\n", info.cache_line, kCacheLine,
-              cache_line_matches_os() ? "" : "  *** MISMATCH ***");
+              cache_line_covers_os() ? "" : "  *** UNDER-PADDED ***");
   std::printf("ring capacity            : %zu slots of %zu bytes\n", cap, sizeof(Msg));
   std::printf("messages per trial       : %" PRIu64 "\n", messages);
   std::printf("trials                   : %d\n\n", trials);
