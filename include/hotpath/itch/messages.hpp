@@ -51,6 +51,11 @@ enum class MsgType : char {
   }
 }
 
+// Every ITCH message begins with this header, so 11 bytes is the universal
+// minimum length for a well-formed message of ANY type -- including a type this
+// build does not know about.
+inline constexpr std::uint16_t kHeaderLength = 11;
+
 // Every message shares an 11-byte header:
 //   [0]    message type
 //   [1:3)  stock locate

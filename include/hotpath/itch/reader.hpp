@@ -24,6 +24,7 @@ struct ReaderStats {
   std::uint64_t length_mismatch{0};   // prefix disagreed with the spec table
   std::uint64_t truncated{0};         // file ended mid-message
   std::uint64_t zero_length{0};       // 0-byte length prefix: stream stops here
+  std::uint64_t short_message{0};     // body shorter than its type's spec length
   std::uint64_t per_type[256]{};
 };
 
@@ -56,17 +57,52 @@ public:
       cur_ = end_;
       return false;
     }
-    out.body = cur_ + 2;
-    out.length = len;
+    const std::uint8_t* body = cur_ + 2;
     cur_ += 2 + len;
-
-    ++stats_.messages;
     stats_.bytes += 2u + len;
-    const auto t = static_cast<std::uint8_t>(out.body[0]);
-    ++stats_.per_type[t];
+
+    const auto t = static_cast<std::uint8_t>(body[0]);
+
+    // Every ITCH message carries the 11-byte common header, so anything shorter
+    // is malformed whatever its type claims to be. This has to be checked
+    // BEFORE the per-type length, because an unrecognised type has no spec
+    // length to check against -- and a 3-byte "message" of unknown type was
+    // still handed out, so any caller reading Header::timestamp() (6 bytes at
+    // offset 5) read past the buffer. Found by the fuzz campaign, not by
+    // reasoning: the earlier fix only considered types we know.
+    if (__builtin_expect(len < kHeaderLength, 0)) {
+      ++stats_.short_message;
+      ++stats_.messages;
+      ++stats_.per_type[t];
+      return next(out);
+    }
+
     const std::uint16_t expect = spec_length(static_cast<char>(t));
-    if (__builtin_expect(expect == 0, 0)) ++stats_.unknown_type;
-    else if (__builtin_expect(expect != len, 0)) ++stats_.length_mismatch;
+    if (__builtin_expect(expect == 0, 0)) {
+      ++stats_.unknown_type;
+    } else if (__builtin_expect(expect != len, 0)) {
+      ++stats_.length_mismatch;
+      // A body SHORTER than its type's spec length must never be handed out.
+      // The typed views read at fixed offsets -- AddOrderView::price() reads at
+      // byte 32 -- so a 4-byte message claiming to be an 'A' makes every caller
+      // read 28 bytes past it. Confirmed as a heap-buffer-overflow under ASan
+      // before this check existed.
+      //
+      // Skipping rather than stopping: the length prefix still says where the
+      // next message begins, so one malformed message does not have to end the
+      // parse. The count is already part of the gate, which requires zero.
+      if (__builtin_expect(len < expect, 0)) {
+        ++stats_.short_message;
+        ++stats_.messages;
+        ++stats_.per_type[t];
+        return next(out);        // skip it and try the next
+      }
+    }
+
+    out.body = body;
+    out.length = len;
+    ++stats_.messages;
+    ++stats_.per_type[t];
     return true;
   }
 

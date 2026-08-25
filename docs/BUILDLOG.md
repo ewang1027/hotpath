@@ -523,6 +523,71 @@ estimates slightly (AAPL 10s naive -0.232 -> -0.242). A 1-share fill and a
 
 ---
 
+## Phase 13 — fuzzing  [DONE]
+
+Eight bugs came out of a manual hunt, so the obvious follow-up was to automate
+the hunt. Two targets, one body each, shared between a seeded runner in the test
+suite and a libFuzzer entry point.
+
+**It found a real out-of-bounds read before it was even written.** The typed
+ITCH views read at fixed offsets -- `AddOrderView::price()` reads byte 32 -- but
+`Reader` only *counted* length mismatches and handed the body out regardless. A
+4-byte message claiming to be an `A` therefore made every caller read 28 bytes
+past it: confirmed as a heap-buffer-overflow under ASan. Reachable from any
+malformed or adversarial ITCH file; the real Nasdaq file never triggers it
+(zero length mismatches over 268.7M messages), which is exactly why it survived
+this long. `Reader` now refuses to hand out a body shorter than its type's spec
+length, skipping it rather than ending the parse, since the length prefix still
+says where the next message begins.
+
+**The fuzzer was validated against that bug.** Removing the guard and rerunning
+the fuzz tests under ASan reproduces the overflow from the regression corpus;
+restoring it passes. A fuzzer that has never caught anything is decoration.
+
+**Then the campaign found a second one that reasoning had missed.** The first
+fix only rejected under-length bodies of types with a *known* spec length. A
+3-byte message of an unrecognised type has no spec length to check against, so
+it was still handed out -- and any caller reading `Header::timestamp()` (six
+bytes at offset 5) read past the buffer. Every ITCH message carries the 11-byte
+common header, so 11 is now the floor for any type at all, checked before the
+per-type length. A regression test sweeps every type byte at every length below
+11.
+
+That is the argument for fuzzing in one paragraph: the manual fix was correct
+as far as it went, and the case it missed was the one nobody thinks about.
+
+**Campaign result after both fixes:** 150,000 iterations, 154 MB of generated
+input, 0 failures, ~1,800 iterations/sec under ASan. The full-day parse is
+byte-for-byte unaffected -- 268,744,780 messages, zero length mismatches, zero
+bytes unread.
+
+### Targets
+
+- `fuzz_itch_parse` -- parse arbitrary bytes and touch every accessor of every
+  known message type. Purely random bytes rarely produce a plausible length
+  prefix followed by a known type, so the generator also builds *valid* ITCH and
+  then corrupts a few bytes, which is what reaches the typed accessors at all.
+- `fuzz_book_differential` -- decode bytes into a book-event script and replay
+  it into all four designs, asserting their ten-deep snapshots agree after every
+  event. The automated form of the gate that caught the intrusive book silently
+  dropping orders. Prices are spread deliberately across the dense grid, just
+  outside it, far outside it, and off the penny, so both overflow paths are
+  reachable from short inputs.
+
+### Drivers
+
+Apple's clang does not ship libFuzzer and brew llvm was not installed, so the
+primary driver is a **deterministic seeded runner inside the test suite**: no
+toolchain requirement, runs in all three sanitizer configurations on every
+build, and reproducible from a seed. Under ASan it has real teeth. libFuzzer
+entry points exist behind `-DHOTPATH_FUZZ=ON` for coverage-guided campaigns
+where the toolchain supports it, and share the same target bodies so a bug found
+in one driver is reachable from the other.
+
+`tests/fuzz_campaign.cpp` is the long-running driver; CI runs a short one.
+
+---
+
 ## Remaining / not attempted
 
 Stated as gaps in the README rather than hidden: no network path or kernel

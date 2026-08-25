@@ -40,6 +40,13 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      # The seeded fuzz targets are part of the suite above and so run in every
+      # configuration. This adds a short campaign on top, which matters most in
+      # the ASan build: without a sanitizer the parser target mostly proves
+      # termination, which is the least interesting of its properties.
+      - name: Fuzz campaign
+        run: ./build/tests/fuzz_campaign --iterations 20000 --seed ${{ github.run_number }}
+
   litmus:
     # The memory-ordering demonstration. Only asserts that the release/acquire
     # ring is clean -- whether the relaxed variant *reproduces* a violation on a

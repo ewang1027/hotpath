@@ -128,12 +128,13 @@ TEST_CASE("itch: truncated tail is detected, not walked off the end", "[itch]") 
   REQUIRE(r.stats().messages == 0);
 }
 
-TEST_CASE("itch: unknown message type is skipped via the length prefix", "[itch]") {
+TEST_CASE("itch: unknown message type is carried past by the length prefix", "[itch]") {
+  // A type the spec table does not know, but long enough to be a well-formed
+  // ITCH message. Framing must carry us past it without desynchronising, and it
+  // is still handed out -- a future protocol addition is not corruption.
   ItchBuilder b;
   b.add_order(1, Side::Buy, 100, "AAPL", 1000000);
-  // A type the spec table does not know, 5 bytes of body. Framing must carry us
-  // past it without desynchronising.
-  b.add({std::uint8_t('~'), 0, 0, 0, 0});
+  b.add({std::uint8_t('~'), 0,0, 0,0, 0,0,0,0,0,0, 9, 9});   // 13 bytes
   b.order_delete(1);
 
   Reader r(b.bytes().data(), b.bytes().size());
@@ -144,6 +145,30 @@ TEST_CASE("itch: unknown message type is skipped via the length prefix", "[itch]
   REQUIRE_FALSE(r.next(m));
   REQUIRE(r.stats().unknown_type == 1);
   REQUIRE(r.stats().length_mismatch == 0);
+  REQUIRE(r.stats().short_message == 0);
+}
+
+// The counterpart, and the bug the fuzz campaign found: an unknown type has no
+// spec length to validate against, so before this it was handed out at ANY
+// length. Callers read the 11-byte common header off it and ran past the
+// buffer. Every ITCH message has that header, so 11 is the floor for any type.
+TEST_CASE("itch: a message too short to hold the common header is skipped",
+          "[itch]") {
+  ItchBuilder b;
+  b.add_order(1, Side::Buy, 100, "AAPL", 1000000);
+  b.add({std::uint8_t('~'), 0, 0, 0, 0});          // unknown type, only 5 bytes
+  b.order_delete(1);
+
+  Reader r(b.bytes().data(), b.bytes().size());
+  RawMessage m{};
+  REQUIRE(r.next(m)); REQUIRE(m.type() == 'A');
+  REQUIRE(r.next(m)); REQUIRE(m.type() == 'D');    // the short one never surfaces
+  REQUIRE_FALSE(r.next(m));
+  REQUIRE(r.stats().short_message == 1);
+  // Still counted and still consumed: framing stays in sync, and the gate,
+  // which requires zero, still sees it.
+  REQUIRE(r.stats().messages == 3);
+  REQUIRE(r.stats().bytes == b.bytes().size());
 }
 
 TEST_CASE("itch: the parse loop allocates nothing", "[itch][invariant]") {
