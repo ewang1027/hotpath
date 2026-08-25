@@ -409,3 +409,96 @@ my_join_ref` as the same O(1) test. ITCH order reference numbers are not
 monotonic — 21,094 non-monotonic adds on AAPL in one day, 3.0% of adds — so it
 would have silently corrupted queue position. The book's own insertion stamp is
 monotonic by construction.
+
+
+---
+
+# Cross-process market data over shared memory
+
+The in-process pipeline above is a negative result: splitting the tick-to-trade
+path across threads is **1.30–1.62x slower**, because a ~15 ns ring hop bought
+nothing on a critical path that did not get shorter. The conclusion drawn there
+was that a ring is worth paying for only at a boundary that *has* to exist.
+
+A process boundary is one. `ShmRing` crosses it through a file-backed `mmap`,
+and it is a deliberately different design from `SpscRing`.
+
+## Why it is not the same ring
+
+`SpscRing` blocks the producer when the consumer falls behind. That is correct
+for an internal pipeline and wrong for market data: **you cannot apply
+backpressure to an exchange.** A feed handler that stalls because a downstream
+consumer is slow has converted a consumer problem into a market data outage.
+
+So this ring never blocks. It overwrites, and a consumer that falls behind
+detects that it was lapped and reports a **gap**. Losing data loudly beats
+stalling the feed, and beats the third option — silently reading stale or torn
+messages — by more than either.
+
+| | `SpscRing` (in-process) | `ShmRing` (cross-process) |
+|---|---|---|
+| Producer when consumer is slow | blocks | **overwrites, never waits** |
+| Consumer that falls behind | cannot happen | **detects a gap, resynchronises** |
+| Torn reads | impossible (producer waits) | **detected by a per-slot seqlock** |
+| Consumers | one | many, independent, each with its own cursor |
+
+Per-slot protocol: a version word is made odd before a write and even after, so
+a reader that sees an odd version retries, and a reader whose version changed
+across the payload copy knows it was overwritten mid-read. The slot also carries
+its own message sequence, so a reader can tell "not published yet" from "long
+gone" without consulting the producer.
+
+Atomics are `std::atomic_ref` over plain integers in the mapping. Placement-new
+of `std::atomic` objects into another process's shared memory is the usual
+approach and is not actually well-defined; `atomic_ref` is, and is lock-free for
+`uint64_t` on every target here.
+
+## Result
+
+`./scripts/shm_demo.sh AAPL` runs a publisher and a subscriber as two genuine
+processes over one trading day of AAPL (1,512,179 events), paced at ~1.7 M
+msg/s — real ITCH peaks in the low millions, whereas an unpaced publisher pushes
+~156 M msg/s from a memory-mapped tape, which measures `memcpy` rather than a
+market data feed.
+
+**Healthy subscriber:**
+
+```
+published: 1512179 in 0.877 s (1.72 M msg/s)
+received : 1512179
+missed   : 0 in 0 gap event(s)
+fills    : 9535   digest 17bc4567950ee09f
+```
+
+The fill digest is **identical to the in-process run**. Crossing a process
+boundary changed nothing about what the strategy did — the same property the
+threaded pipeline gates on, now across a real boundary.
+
+**Deliberately handicapped subscriber** (`./scripts/shm_demo.sh AAPL 20000`):
+
+```
+published: 1512179 in 0.785 s (1.93 M msg/s)   <- publisher unaffected
+received :  199643
+missed   : 1312536 in 251 gap event(s)
+accounted: 1512179 of 1512179 published [OK]
+```
+
+Two things to read off that. The publisher's rate is **unchanged** — it never
+waited for the subscriber. And every published message is **accounted for**:
+delivered, or counted in a gap. Nothing is invented and nothing silently
+vanishes, which is the property that matters, because a feed handler that
+quietly drops messages builds a book that is wrong in a way nothing downstream
+can detect.
+
+A unit test makes the non-blocking claim directly, measuring publish cost with
+and without a slow consumer attached; another checks that received + gapped
+equals published exactly, over 200,000 messages.
+
+## What this does and does not justify
+
+It does not overturn the pipeline result. Moving 15 ns of book maintenance onto
+another thread still costs more than it saves. What changed is the reason for
+the hop: crossing a process boundary is a constraint, not an optimisation, and
+shared memory is how you cross it without a copy through the kernel. The ring
+earns its place where the boundary is given, exactly as the earlier measurement
+concluded.

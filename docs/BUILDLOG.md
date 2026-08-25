@@ -589,6 +589,50 @@ in one driver is reachable from the other.
 
 ---
 
+## Phase 14 — cross-process shared-memory bus  [DONE]
+
+The pipeline result said a ring is worth paying for only at a boundary that has
+to exist. A process boundary is one, so this crosses it: `ShmRing`, a
+file-backed `mmap` ring with a per-slot seqlock.
+
+**It is deliberately not the same design as `SpscRing`.** That one blocks the
+producer when the consumer falls behind, which is right for an internal pipeline
+and wrong for market data -- you cannot apply backpressure to an exchange. This
+one never blocks: it overwrites, and a lapped consumer detects a **gap**. Losing
+data loudly beats stalling the feed, and beats silently reading stale or torn
+messages by more than either.
+
+**Gate: PASS.** Two real processes over a full day of AAPL:
+- healthy subscriber: 1,512,179 received, **0 gaps**, fill digest
+  `17bc4567950ee09f` -- **identical to the in-process run**;
+- handicapped subscriber: publisher rate **unchanged** (1.93 M msg/s), 199,643
+  received, 1,312,536 missed across 251 gap events, and **all 1,512,179
+  accounted for** as delivered-or-gapped.
+
+### Details worth keeping
+
+- **`std::atomic_ref` over plain integers in the mapping**, not `std::atomic`
+  objects placement-new'd into it. The latter is what most implementations do
+  and is not actually well-defined; `atomic_ref` is, and is lock-free for
+  `uint64_t` here. It does not accept a const `T`, which is worth knowing before
+  writing const accessors around a shared mapping.
+- **The per-slot version word is made odd before a write and even after**, so a
+  reader that sees an odd version retries and a reader whose version changed
+  across the payload copy knows it was overwritten mid-read. Each slot also
+  carries its own message sequence, so a reader distinguishes "not published
+  yet" from "long gone" without consulting the producer.
+- **An unpaced publisher pushes ~156 M msg/s** from a memory-mapped tape, which
+  measures `memcpy` rather than a market data feed and laps any real consumer
+  instantly. The demo paces to ~1.7 M msg/s, which is roughly where real ITCH
+  peaks; without that the no-gap case is unreachable and the demo shows nothing.
+
+This does not overturn the pipeline result. Moving 15 ns of book maintenance to
+another thread still costs more than it saves. What changed is the reason for
+the hop: a process boundary is a constraint rather than an optimisation, and
+shared memory is how you cross it without a copy through the kernel.
+
+---
+
 ## Remaining / not attempted
 
 Stated as gaps in the README rather than hidden: no network path or kernel

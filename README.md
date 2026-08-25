@@ -75,6 +75,15 @@ stages are wildly unbalanced. The fill streams hash identically to the
 single-threaded path, so the handoff is correct; it just does not pay here.
 [Details](docs/PERFORMANCE.md#threaded-tick-to-trade-pipeline)
 
+**Market data needs a ring that drops messages, not one that blocks.** The
+cross-process `ShmRing` never stalls the publisher — you cannot backpressure an
+exchange — so it overwrites, and a lapped subscriber detects a **gap** rather
+than reading stale or torn data. Two real processes over one trading day: with a
+healthy subscriber the fill digest is **identical to the in-process run**; with
+a handicapped one the publisher's rate is unchanged and all 1,512,179 messages
+are accounted for as delivered-or-gapped.
+[Details](docs/PERFORMANCE.md#cross-process-market-data-over-shared-memory)
+
 **`memory_order_relaxed` in the SPSC ring reproducibly breaks on arm64** — 1,463
 premature reads and 544 torn reads per 10.5M messages, against zero for
 release/acquire. The same code passes on x86 because TSO forbids the reordering,
@@ -139,10 +148,12 @@ include/hotpath/
   core/    types, cache-line constants, timebase, open-addressing hash map
   itch/    zero-copy ITCH 5.0 views over an mmap, BinaryFILE framing
   book/    four order book designs behind one duck-typed interface
-  ipc/     SPSC ring with ordering and padding as policy parameters
+  ipc/     SPSC ring with ordering and padding as policy parameters;
+           cross-process shared-memory ring with gap detection
   sim/     FIFO queue position, fill model, market maker, microstructure signals
 src/       itch_stat, extract_tape, tape_stat, book_crossval, sim_mm,
-           latency_sweep, signal_study, strategy_eval, pipeline, litmus_ring
+           latency_sweep, signal_study, strategy_eval, pipeline, litmus_ring,
+           shm_pub, shm_sub
 bench/     book design study, false-sharing experiment
 docs/      METHODOLOGY, PERFORMANCE, ADVERSE-SELECTION, BUILDLOG
 ```

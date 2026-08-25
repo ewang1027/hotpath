@@ -30,3 +30,9 @@ target_link_libraries(signal_study PRIVATE hotpath hotpath_instrument)
 
 add_executable(strategy_eval strategy_eval.cpp)
 target_link_libraries(strategy_eval PRIVATE hotpath hotpath_instrument)
+
+add_executable(shm_pub shm_pub.cpp)
+target_link_libraries(shm_pub PRIVATE hotpath hotpath_instrument)
+
+add_executable(shm_sub shm_sub.cpp)
+target_link_libraries(shm_sub PRIVATE hotpath hotpath_instrument)
