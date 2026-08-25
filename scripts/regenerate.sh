@@ -48,6 +48,12 @@ for s in "${SYMS[@]}"; do ./build/src/sim_mm "$TAPE_DIR/$s.tape" --size 100; don
 echo; echo "===== latency sweep (docs/ADVERSE-SELECTION.md result 4) ====="
 for s in "${SYMS[@]}"; do ./build/src/latency_sweep "$TAPE_DIR/$s.tape" --size 100; done
 
+echo; echo "===== signal predictive power (docs/SIGNALS.md section 1) ====="
+for s in "${SYMS[@]}"; do ./build/src/signal_study "$TAPE_DIR/$s.tape"; done
+
+echo; echo "===== signal-driven policy (docs/SIGNALS.md sections 2-3) ====="
+for s in "${SYMS[@]}"; do ./build/src/strategy_eval "$TAPE_DIR/$s.tape" --size 100 --horizon-ms 1000; done
+
 echo; echo "===== threaded pipeline (docs/PERFORMANCE.md) ====="
 for s in "${SYMS[@]}"; do ./build/src/pipeline "$TAPE_DIR/$s.tape" --trials 5; done
 

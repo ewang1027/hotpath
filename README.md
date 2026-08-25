@@ -28,13 +28,16 @@ that tracks FIFO queue position — and advances it when orders ahead are
 you fill least: 3.7x on SPY, 15.6x on SIRI.
 [Details](docs/ADVERSE-SELECTION.md)
 
-**Passive fills are adversely selected — on 25 of 25 symbols.** 10-second
-markouts are negative everywhere, and they worsen with queue depth on 10 of the
-13 symbols with enough fills to judge (on AAPL, ~4x from the shallowest bucket
-to 501–2000). To fill from deep in a queue the market must trade *through*
-everything ahead of you, which is exactly when you did not want the fill. SPY —
-a broad index ETF — shows an order of magnitude less adverse selection than the
-single names, the expected result recovered from data.
+**Passive fills are adversely selected — 25 of 25 symbols, sign test p = 6×10⁻⁸.**
+Every markout is share-weighted with a 95% block-bootstrap interval, because
+fills arrive in bursts and resampling them independently would give intervals
+several times too tight. The intervals also *cost* a claim: an earlier version
+of this repo said markout worsens with queue depth on 10 of 13 symbols. Tested
+properly, 8 of 25 significantly support that and **3 significantly reverse it**
+— real symbol-specific structure, but not the one-directional law the point
+estimates suggested. SPY shows an order of magnitude less adverse selection than
+the single names, as expected for a broad index ETF — and at the 10s horizon its
+interval spans zero, which the point estimate alone would have hidden.
 
 <img src="docs/img/design-crossover.svg" alt="Intrusive book speedup vs std::map against vector elements shifted per event, 25 symbols; the design falls below break-even past a few hundred elements per event" width="100%">
 

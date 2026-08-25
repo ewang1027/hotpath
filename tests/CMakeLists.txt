@@ -15,6 +15,7 @@ add_executable(hotpath_tests
   test_sim.cpp
   test_market_maker.cpp
   test_signals.cpp
+  test_bootstrap.cpp
 )
 target_link_libraries(hotpath_tests PRIVATE hotpath hotpath_instrument Catch2::Catch2WithMain)
 target_include_directories(hotpath_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

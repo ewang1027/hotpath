@@ -44,53 +44,79 @@ to a fill count that does not exist.
 
 Markout is the mid-price move after the fill, signed so that positive means the
 fill was good: `sign × (mid(t+h) − fill_price)`, with `sign = +1` for buys.
+Means are **share-weighted** — a 1-share fill and a 500-share fill are not equal
+evidence — with a 95% **block bootstrap** confidence interval over 5-minute
+blocks, 2000 resamples. Blocks rather than individual fills because fills
+cluster hard: executions arrive in microsecond bursts against a ~100 ms median
+event gap, so resampling fills independently would treat a burst of correlated
+fills as independent evidence and return an interval several times too tight.
 
-Queue-aware model, mean markout in basis points:
+Queue-aware model, markout in basis points with 95% CI:
 
-| symbol | 1s | 10s | 60s | 10s buys | 10s sells |
-|---|---:|---:|---:|---:|---:|
-| AAPL | −0.220 | −0.282 | −0.307 | −0.440 | −0.123 |
-| MSFT | −0.096 | −0.165 | −0.199 | −0.172 | −0.156 |
-| INTC | −0.365 | −0.393 | −0.412 | −0.499 | −0.298 |
-| SPY | −0.035 | −0.038 | **+0.027** | −0.036 | −0.039 |
+| symbol | 1s | 10s | 60s |
+|---|---|---|---|
+| AAPL | −0.219 [−0.260, −0.178] | −0.259 [−0.323, −0.198] | −0.262 [−0.417, −0.111] |
+| MSFT | −0.116 [−0.143, −0.081] | −0.180 [−0.252, −0.113] | −0.204 [−0.322, −0.091] |
+| INTC | −0.373 [−0.420, −0.326] | −0.422 [−0.534, −0.315] | −0.443 [−0.569, −0.321] |
+| SPY | −0.024 [−0.035, −0.012] | −0.011 [−0.043, **+0.022**] | +0.082 [−0.020, +0.181] |
 
-Markouts are negative almost everywhere and get worse as the horizon lengthens:
-after you are filled, the mid keeps moving against you. That is adverse
+**The 10s markout is negative on 25 of 25 symbols (sign test p = 6×10⁻⁸).**
+After you are filled, the mid keeps moving against you. That is adverse
 selection — the counterparty who traded with you knew something, or at minimum
 your fill was caused by the price moving through your level.
 
-SPY is the informative exception. It is the most liquid instrument here and its
-adverse selection is an order of magnitude smaller (−0.038 bps at 10s versus
-AAPL's −0.282), turning slightly positive by 60s. That is what you would expect
-from a broad-index ETF: order flow in it carries far less single-name private
-information than flow in an individual stock. The measurement recovers a
-well-known microstructure fact without being told about it.
+SPY is the informative exception, and the interval sharpens what can be said
+about it. Its adverse selection is an order of magnitude smaller than AAPL's,
+and at the 10 s horizon **the interval spans zero** — on one session, SPY's
+adverse selection is only resolvable at 1 s. That is what you would expect from
+a broad-index ETF: order flow in it carries far less single-name private
+information. Reporting the point estimate alone (−0.011) would have implied a
+precision the data does not support.
 
-## Result 3 — the deeper your queue position, the worse your fills
+## Result 3 — queue depth matters, but not in one direction
 
 10-second markout on the queue-aware model, bucketed by how much volume was
-resting ahead when we joined:
+resting ahead when we joined. AAPL, with intervals:
 
-| volume ahead at join | AAPL | SPY | MSFT | INTC |
-|---|---:|---:|---:|---:|
-| 1–100 | −0.205 | 0.000 | −0.103 | −0.460 |
-| 101–500 | −0.388 | −0.014 | −0.143 | −0.210 |
-| 501–2000 | **−0.813** | −0.123 | **−0.333** | −0.449 |
-| >2000 | +0.111 *(64 fills)* | −0.036 | −0.270 | −0.479 |
+| volume ahead at join | fills | markout | 95% CI |
+|---|---:|---:|---|
+| 1–100 | 6,274 | −0.196 | [−0.267, −0.126] |
+| 101–500 | 2,803 | −0.358 | [−0.480, −0.248] |
+| 501–2000 | 394 | −0.645 | [−1.031, −0.273] |
+| >2000 | 64 | +0.240 | [−1.057, +1.214] |
 
-On AAPL the markout worsens monotonically with depth, roughly **4x worse** from
-the shallowest bucket to the 501–2000 bucket. MSFT and SPY show the same
-direction; INTC is noisier.
+The staircase is real on AAPL, and the deep-minus-shallow difference is
+**−0.449 [−0.834, −0.070]** — significant. (The `>2000` bucket has 64 fills and
+an interval two bps wide; the earlier version of this table reported its
+point estimate of +0.111 as if it meant something.)
 
-The mechanism is mechanical once stated: to be filled from deep in a queue, the
-market has to trade *through* everything resting in front of you at that price.
-That only happens when the price is being pushed through your level — which is
-precisely the case where you did not want the fill. **Shallow-queue fills are
-mostly noise trades; deep-queue fills are disproportionately informed ones.**
+**Across 25 symbols the picture is more complicated, and an earlier version of
+this document overstated it.** Testing deep-minus-shallow per symbol with a
+paired block bootstrap:
 
-This is why queue position is a first-class quantity in real passive trading and
-not an implementation detail: it changes both *how often* you fill and *which*
-fills you get.
+| | count |
+|---|---|
+| significant | **11 / 25** (≈1.25 expected by chance at 5%) |
+| …supporting (deep worse) | 8 — AAPL, IWM, KO, MSFT, NVDA, SPY, WFC, XOM |
+| …opposing (deep better) | 3 — GE, JPM, T |
+| point estimate negative | 14 / 24, sign test **p = 0.541** |
+
+So there is real symbol-specific structure — eleven significant results where
+chance would give about one is not an accident — but **it is not consistently
+signed**. Three symbols significantly reverse it, and the sign test across
+point estimates is a coin flip.
+
+The mechanism argues for the negative direction: to be filled from deep in a
+queue, the market must trade *through* everything resting in front of you, which
+only happens when the price is being pushed through your level — precisely when
+you did not want the fill. That story holds on 8 symbols. It does not hold
+universally, and the honest statement is that queue depth changes *which* fills
+you get in a symbol-specific way, not that deeper is uniformly worse.
+
+The earlier claim here was "worsens with queue depth on 10 of 13 symbols",
+counted by comparing bucket point estimates. That was a directional tally
+dressed up as a finding: buckets have wildly different sample sizes, and
+comparing their means is not a test. Adding one downgraded it.
 
 ## Relation to the theory
 
@@ -113,7 +139,7 @@ cross-validating with **zero divergences** on every one.
 |---|---|
 | Naive model overstates filled volume | **25 / 25**, from 3.4x to **15.6x**, median 5.7x |
 | Passive fills are adversely selected (negative 10s markout) | **25 / 25** |
-| Markout worsens with queue depth | **10 / 13** symbols with ≥200 fills in both buckets |
+| Markout worsens with queue depth | **8 / 25** significantly support, **3 / 25** significantly oppose (see Result 3) |
 
 **The overstatement is worse than the four-symbol sample suggested.** The
 original range was 3.7–6.4x; across 25 it reaches **15.6x on SIRI** and 12.9x on
@@ -123,16 +149,11 @@ fills) and GE (291) are at 15.6x and 12.8x. Where a passive order genuinely
 reaches the front of the queue, the two models converge; where it rarely does,
 assuming it always fills is catastrophically wrong.
 
-**The queue-depth result is real but weaker than four symbols implied.** It
-holds on 10 of the 13 symbols with enough fills in both buckets to compare
-(AAPL, AMD, PFE, WFC, KO, MSFT, SPY, IWM, QQQ, XOM) and fails on three (CSCO,
-INTC, JPM). Reported as a directional effect, not a law. The 12 remaining
-symbols have too few deep-queue fills — often fewer than 100 — to say anything,
-and are excluded rather than counted as support.
-
-Where it does hold it can be large: AMZN's deep bucket is −4.92 bps against
-−0.89 shallow, and TSLA's is −2.73 against −0.79, though both rest on fewer than
-100 deep fills.
+**The queue-depth result survived a proper test only in part.** With a paired
+block bootstrap per symbol, 11 of 25 are significant — far more than the ~1.25
+chance would give, so the structure is real — but 8 support the effect and 3
+significantly reverse it, and the sign test on point estimates is p = 0.541.
+See Result 3.
 
 ## Result 4 — what re-quote latency actually costs
 
@@ -257,5 +278,7 @@ What governs is the volume consumed at the level, not which order consumed it.
   executions are not at the level's FIFO head, and the model absorbs those.
 - **Queue-position-only fill priority.** Hidden orders, odd-lot handling, and
   non-displayed liquidity are not modelled; ITCH does not show them.
-- **One day, four symbols.** The direction of every result is consistent across
-  the four, but a single session is a single sample.
+- **One trading day.** The cross-section is 25 symbols wide; the time series is
+  n=1. A sign test across 25 correlated symbols on the same session is not 25
+  independent trials, and the confidence intervals quantify sampling variation
+  *within* that session only — they say nothing about day-to-day variation.

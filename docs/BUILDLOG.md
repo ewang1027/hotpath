@@ -481,6 +481,48 @@ Full write-up in `SIGNALS.md`.
 
 ---
 
+## Phase 12 — confidence intervals on every published result  [DONE]
+
+Every markout in this repo was a bare mean. A quant reader's first question is
+whether -0.282 bps is distinguishable from zero, and there was no answer.
+
+`include/hotpath/sim/bootstrap.hpp` now provides a share-weighted **block
+bootstrap** (5-minute wall-clock blocks, 2000 resamples) and a **paired**
+variant. Blocks rather than individual fills because fills cluster hard --
+executions burst on microsecond gaps against a ~100 ms median -- so an i.i.d.
+resample would call a burst of correlated fills independent evidence and return
+an interval several times too tight. Paired wherever both series are observed
+over the same session, which cancels the common variance; a test demonstrates
+two series whose individual intervals are 20x too wide to say anything while
+their paired difference resolves cleanly.
+
+**What it strengthened:**
+- Adverse selection: negative on **25/25 symbols, sign test p = 6e-8**, and
+  every per-symbol interval on the main table excludes zero.
+- The queue-depth effect on AAPL: deep-minus-shallow **-0.449 [-0.834, -0.070]**,
+  now an actual test rather than a comparison of bucket means.
+
+**What it cost:**
+- The claim "markout worsens with queue depth on 10/13 symbols" was a
+  directional tally, not a test -- buckets have wildly different sample sizes.
+  Tested per symbol with a paired bootstrap: 11/25 significant (vs ~1.25 by
+  chance, so the structure is real) but **8 support and 3 significantly
+  reverse** it, sign test p = 0.541. Downgraded in the docs.
+- The `>2000` depth bucket's "+0.111" turns out to be 64 fills with an interval
+  two bps wide. It had been reported as if it meant something.
+- SPY's 10s adverse selection is **not** resolvable on one session: the interval
+  spans zero, though the 1s one does not.
+- Queue-aware minus naive markout on AAPL is **not significant**
+  (-0.017 [-0.095, +0.070]). The two fill models differ in fill *volume*
+  (6.4x), not in per-share markout quality -- a sharper statement than the
+  earlier text implied.
+
+Means are now share-weighted rather than per-fill, which moved some point
+estimates slightly (AAPL 10s naive -0.232 -> -0.242). A 1-share fill and a
+500-share fill are not equal evidence about a strategy's economics.
+
+---
+
 ## Remaining / not attempted
 
 Stated as gaps in the README rather than hidden: no network path or kernel

@@ -14,6 +14,7 @@
 #include "hotpath/book/hybrid_book.hpp"
 #include "hotpath/book/tape.hpp"
 #include "hotpath/core/platform.hpp"
+#include "hotpath/sim/bootstrap.hpp"
 #include "hotpath/sim/market_maker.hpp"
 
 #include <algorithm>
@@ -21,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace hotpath;
@@ -41,13 +43,6 @@ double mid_at(const std::vector<MidSample>& s, Ts t) {
   return (it - 1)->mid;
 }
 
-struct Markout {
-  double sum_bps{0};
-  std::uint64_t n{0};
-  void add(double bps) { sum_bps += bps; ++n; }
-  [[nodiscard]] double mean() const { return n ? sum_bps / static_cast<double>(n) : 0.0; }
-};
-
 double markout_bps(const Fill& f, const std::vector<MidSample>& mids, Ts horizon) {
   const double m = mid_at(mids, f.ts + horizon);
   if (m < 0) return 1e18;                      // sentinel: no sample that late
@@ -55,60 +50,99 @@ double markout_bps(const Fill& f, const std::vector<MidSample>& mids, Ts horizon
   return 1e4 * sign * (m - static_cast<double>(f.price)) / m;
 }
 
+// 5-minute blocks: long enough that fills in different blocks are close to
+// independent, short enough to leave ~190 blocks in a session to resample.
+constexpr Ts kBlock = 300 * kSec;
+
+// Turn fills into weighted observations for the bootstrap. Weighting by share
+// count matters: a 1-share fill and a 500-share fill are not equal evidence
+// about the strategy's economics.
+std::vector<WeightedObs> to_obs(const std::vector<Fill>& fills,
+                                const std::vector<MidSample>& mids, Ts horizon,
+                                int side_filter = -1) {
+  std::vector<WeightedObs> out;
+  out.reserve(fills.size());
+  for (const Fill& f : fills) {
+    if (side_filter >= 0 && static_cast<int>(f.side) != side_filter) continue;
+    const double b = markout_bps(f, mids, horizon);
+    if (b > 1e17) continue;
+    out.push_back(WeightedObs{f.ts, b, static_cast<double>(f.qty)});
+  }
+  return out;
+}
+
 void report_markouts(const char* label, const std::vector<Fill>& fills,
                      const std::vector<MidSample>& mids) {
   const Ts hz[3] = {1 * kSec, 10 * kSec, 60 * kSec};
   const char* names[3] = {"1s", "10s", "60s"};
-  std::printf("\n  %s -- markout (positive = we were right, negative = adversely selected)\n", label);
-  std::printf("    %-6s %10s %12s %12s %12s\n", "horiz", "fills", "all (bps)", "buys", "sells");
+  std::printf("\n  %s -- markout, share-weighted, 95%% block-bootstrap CI\n", label);
+  std::printf("    (negative = adversely selected; an interval spanning 0 means the\n");
+  std::printf("     sign is not established on this one session)\n");
+  std::printf("    %-6s %9s %9s %18s %9s %9s\n",
+              "horiz", "fills", "all", "95% CI", "buys", "sells");
   for (int h = 0; h < 3; ++h) {
-    Markout all, buys, sells;
-    for (const Fill& f : fills) {
-      const double b = markout_bps(f, mids, hz[h]);
-      if (b > 1e17) continue;
-      all.add(b);
-      (f.side == Side::Buy ? buys : sells).add(b);
-    }
-    std::printf("    %-6s %10" PRIu64 " %12.3f %12.3f %12.3f\n",
-                names[h], all.n, all.mean(), buys.mean(), sells.mean());
+    const Interval all = block_bootstrap(to_obs(fills, mids, hz[h]), kBlock);
+    const Interval buy = block_bootstrap(to_obs(fills, mids, hz[h], 0), kBlock);
+    const Interval sel = block_bootstrap(to_obs(fills, mids, hz[h], 1), kBlock);
+    std::printf("    %-6s %9" PRIu64 " %9.3f  [%7.3f,%7.3f]%s %9.3f %9.3f\n",
+                names[h], all.n, all.point, all.lo, all.hi,
+                all.excludes_zero() ? "*" : " ", buy.point, sel.point);
   }
+  std::printf("    * interval excludes zero\n");
 }
 
 void report_by_queue_depth(const std::vector<Fill>& fills,
                            const std::vector<MidSample>& mids) {
-  struct Bucket { const char* name; Qty lo, hi; Markout m; };
+  struct Bucket { const char* name; Qty lo, hi; std::vector<Fill> f; };
   Bucket b[] = {
-      {"0 (alone)", 0, 0}, {"1-100", 1, 100}, {"101-500", 101, 500},
-      {"501-2000", 501, 2000}, {">2000", 2001, 0xFFFFFFFFu},
+      {"0 (alone)", 0, 0, {}}, {"1-100", 1, 100, {}}, {"101-500", 101, 500, {}},
+      {"501-2000", 501, 2000, {}}, {">2000", 2001, 0xFFFFFFFFu, {}},
   };
-  std::printf("\n  queue-aware -- 10s markout by queue depth at join\n");
-  std::printf("    %-12s %10s %12s\n", "ahead", "fills", "markout(bps)");
-  for (const Fill& f : fills) {
-    const double bps = markout_bps(f, mids, 10 * kSec);
-    if (bps > 1e17) continue;
+  for (const Fill& f : fills)
     for (auto& bk : b)
-      if (f.queue_ahead_at_join >= bk.lo && f.queue_ahead_at_join <= bk.hi) { bk.m.add(bps); break; }
+      if (f.queue_ahead_at_join >= bk.lo && f.queue_ahead_at_join <= bk.hi) {
+        bk.f.push_back(f); break;
+      }
+
+  std::printf("\n  queue-aware -- 10s markout by queue depth at join\n");
+  std::printf("    %-12s %9s %9s %18s\n", "ahead", "fills", "markout", "95% CI");
+  for (const auto& bk : b) {
+    const Interval iv = block_bootstrap(to_obs(bk.f, mids, 10 * kSec), kBlock);
+    std::printf("    %-12s %9" PRIu64 " %9.3f  [%7.3f,%7.3f]%s\n",
+                bk.name, iv.n, iv.point, iv.lo, iv.hi, iv.excludes_zero() ? "*" : " ");
   }
-  for (const auto& bk : b)
-    std::printf("    %-12s %10" PRIu64 " %12.3f\n", bk.name, bk.m.n, bk.m.mean());
+
+  // The actual claim is that deeper queue positions fill worse. Reading it off
+  // the bucket means is not a test -- the buckets have wildly different sample
+  // sizes. Both buckets come from the same session, so resampling the same time
+  // blocks for both is a genuine paired comparison.
+  const Interval d = paired_block_bootstrap(to_obs(b[3].f, mids, 10 * kSec),
+                                            to_obs(b[1].f, mids, 10 * kSec), kBlock);
+  std::printf("    deep (501-2000) minus shallow (1-100): %+.3f [%+.3f,%+.3f] %s\n",
+              d.point, d.lo, d.hi,
+              d.excludes_zero() ? "SIGNIFICANT" : "not significant");
 }
 
 // Fills split by how they were obtained. Under latency the interesting bucket
 // is "stale": a quote we had already decided to move but had not yet replaced.
 void report_by_kind(const std::vector<Fill>& fills, const std::vector<MidSample>& mids) {
-  Markout fresh, stale, swept;
-  std::uint64_t nf = 0, ns = 0, nw = 0;
+  std::vector<Fill> fresh, stale, swept;
   for (const Fill& f : fills) {
-    const double bps = markout_bps(f, mids, 10 * kSec);
-    if (bps > 1e17) continue;
-    if (f.stale) { stale.add(bps); ++ns; } else { fresh.add(bps); ++nf; }
-    if (f.swept) { swept.add(bps); ++nw; }
+    (f.stale ? stale : fresh).push_back(f);
+    if (f.swept) swept.push_back(f);
   }
   std::printf("\n  queue-aware -- 10s markout by how the fill was obtained\n");
-  std::printf("    %-28s %10s %12s\n", "kind", "fills", "markout(bps)");
-  std::printf("    %-28s %10" PRIu64 " %12.3f\n", "fresh quote", nf, fresh.mean());
-  std::printf("    %-28s %10" PRIu64 " %12.3f\n", "stale (replace in flight)", ns, stale.mean());
-  std::printf("    %-28s %10" PRIu64 " %12.3f\n", "swept (we were more aggressive)", nw, swept.mean());
+  std::printf("    %-32s %9s %9s %18s\n", "kind", "fills", "markout", "95% CI");
+  const std::pair<const char*, const std::vector<Fill>*> rows[] = {
+      {"fresh quote", &fresh},
+      {"stale (replace in flight)", &stale},
+      {"swept (we were more aggressive)", &swept},
+  };
+  for (const auto& [name, v] : rows) {
+    const Interval iv = block_bootstrap(to_obs(*v, mids, 10 * kSec), kBlock);
+    std::printf("    %-32s %9" PRIu64 " %9.3f  [%7.3f,%7.3f]%s\n",
+                name, iv.n, iv.point, iv.lo, iv.hi, iv.excludes_zero() ? "*" : " ");
+  }
 }
 
 } // namespace
@@ -209,6 +243,13 @@ int main(int argc, char** argv) {
 
   report_markouts("naive", fills_n, mids);
   report_markouts("queue-aware", fills_q, mids);
+
+  // Both models score the same session, so this is paired too.
+  const Interval mdl = paired_block_bootstrap(to_obs(fills_q, mids, 10 * kSec),
+                                              to_obs(fills_n, mids, 10 * kSec), kBlock);
+  std::printf("\n  queue-aware minus naive, 10s markout: %+.3f [%+.3f,%+.3f] %s\n",
+              mdl.point, mdl.lo, mdl.hi,
+              mdl.excludes_zero() ? "SIGNIFICANT" : "not significant");
   report_by_queue_depth(fills_q, mids);
   report_by_kind(fills_q, mids);
   return 0;

@@ -21,6 +21,7 @@
 // cancel takes the same latency as any other quote change.
 #include "hotpath/book/tape.hpp"
 #include "hotpath/core/platform.hpp"
+#include "hotpath/sim/bootstrap.hpp"
 #include "hotpath/sim/market_maker.hpp"
 #include "hotpath/sim/signals.hpp"
 
@@ -58,6 +59,16 @@ double mid_at(const std::vector<MidSample>& s, Ts t) {
 
 struct FillObs { Ts ts; double bps; Qty qty; Side side; };
 
+// Adapt fills to the shared bootstrap's weighted-observation form. Weighting by
+// share count matters: a 1-share fill and a 500-share fill are not equal
+// evidence about a policy's economics.
+std::vector<WeightedObs> to_obs(const std::vector<FillObs>& f) {
+  std::vector<WeightedObs> v;
+  v.reserve(f.size());
+  for (const auto& x : f) v.push_back(WeightedObs{x.ts, x.bps, static_cast<double>(x.qty)});
+  return v;
+}
+
 struct Outcome {
   std::uint64_t fills{0}, shares{0};
   double markout{0};
@@ -65,62 +76,6 @@ struct Outcome {
   double pnl{0};
   std::vector<FillObs> obs;             // time-ordered, for the paired bootstrap
 };
-
-// Share-weighted markout over a set of time blocks.
-double weighted(const std::vector<std::vector<FillObs>>& blocks,
-                const std::vector<std::size_t>& pick) {
-  double num = 0, den = 0;
-  for (std::size_t b : pick)
-    for (const auto& f : blocks[b]) { num += f.bps * f.qty; den += f.qty; }
-  return den > 0 ? num / den : 0.0;
-}
-
-// Paired block bootstrap on the DIFFERENCE between two policies.
-//
-// Comparing two independent confidence intervals is the wrong test and a very
-// weak one: both policies trade the same market, so most of the variance is
-// common and cancels. Resampling the same time blocks for both and taking the
-// difference inside each resample removes that shared variance entirely.
-//
-// Blocks are wall-clock buckets rather than fill counts because the two
-// policies produce different numbers of fills -- there is nothing to pair
-// fill-by-fill.
-struct Diff { double point, lo, hi; bool significant; };
-
-Diff paired_bootstrap(const std::vector<FillObs>& a, const std::vector<FillObs>& b,
-                      Ts block_ns, int resamples = 2000) {
-  Diff d{};
-  if (a.empty() || b.empty()) return d;
-  const Ts t0 = std::min(a.front().ts, b.front().ts);
-  const Ts t1 = std::max(a.back().ts, b.back().ts);
-  const std::size_t nb = static_cast<std::size_t>((t1 - t0) / block_ns) + 1;
-  if (nb < 8) return d;
-
-  std::vector<std::vector<FillObs>> ba(nb), bb(nb);
-  for (const auto& f : a) ba[static_cast<std::size_t>((f.ts - t0) / block_ns)].push_back(f);
-  for (const auto& f : b) bb[static_cast<std::size_t>((f.ts - t0) / block_ns)].push_back(f);
-
-  std::vector<std::size_t> all(nb);
-  for (std::size_t i = 0; i < nb; ++i) all[i] = i;
-  d.point = weighted(ba, all) - weighted(bb, all);
-
-  std::vector<double> diffs;
-  diffs.reserve(static_cast<std::size_t>(resamples));
-  std::uint64_t rng = 0x9E3779B97F4A7C15ull;
-  auto next = [&] { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return rng; };
-  std::vector<std::size_t> pick(nb);
-  for (int r = 0; r < resamples; ++r) {
-    for (std::size_t i = 0; i < nb; ++i) pick[i] = next() % nb;
-    const double x = weighted(ba, pick), y = weighted(bb, pick);
-    if (x != 0.0 || y != 0.0) diffs.push_back(x - y);
-  }
-  if (diffs.size() < 50) return d;
-  std::sort(diffs.begin(), diffs.end());
-  d.lo = diffs[static_cast<std::size_t>(0.025 * (diffs.size() - 1))];
-  d.hi = diffs[static_cast<std::size_t>(0.975 * (diffs.size() - 1))];
-  d.significant = (d.lo > 0.0) || (d.hi < 0.0);
-  return d;
-}
 
 // How a policy decides which sides to quote.
 //
@@ -266,9 +221,9 @@ int main(int argc, char** argv) {
                   policies[i].name, o.fills, o.shares, o.markout,
                   o.bid_markout, o.ask_markout);
       if (i > 0) {
-        const Diff d = paired_bootstrap(o.obs, outs[0].obs, kBlock);
+        const Interval d = paired_block_bootstrap(to_obs(o.obs), to_obs(outs[0].obs), kBlock);
         std::printf("   %+7.3f [%+7.3f,%+7.3f] %s", d.point, d.lo, d.hi,
-                    d.significant ? "SIGNIF" : "n.s.");
+                    d.excludes_zero() ? "SIGNIF" : "n.s.");
         if (i == 1) skew_cost[m] = d.point;
       }
       std::printf("\n");
@@ -277,13 +232,14 @@ int main(int argc, char** argv) {
     // the same queue-position cost for pulling a quote, so differencing them
     // cancels it and leaves only the signal.
     for (int th = 0; th < 2; ++th) {
-      const Diff d = paired_bootstrap(outs[2 + 2 * th].obs, outs[1 + 2 * th].obs, kBlock);
+      const Interval d = paired_block_bootstrap(to_obs(outs[2 + 2 * th].obs),
+                                                to_obs(outs[1 + 2 * th].obs), kBlock);
       std::printf("  -> THIN minus HEAVY at threshold %.2f: %+.3f bps "
                   "[%+.3f,%+.3f] %s\n",
                   policies[1 + 2 * th].threshold, d.point, d.lo, d.hi,
-                  d.significant ? "SIGNIFICANT" : "not significant");
+                  d.excludes_zero() ? "SIGNIFICANT" : "not significant");
       thin_minus_heavy[m][th] = d.point;
-      thin_sig[m][th] = d.significant;
+      thin_sig[m][th] = d.excludes_zero();
     }
   }
   std::printf("\n  quoting the THIN side rather than the HEAVY side is worth:\n");
