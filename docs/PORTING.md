@@ -12,7 +12,7 @@ machine.
 |---|---|
 | macOS / arm64 | developed here |
 | Linux / arm64 | **verified** — 66/66 tests pass, `./scripts/linux_build.sh` |
-| Linux / x86-64 | same source, same shims; this is the interesting one |
+| Linux / x86-64 | **verified in CI** (`ubuntu-latest` is x86-64); locally, all 14 tools build and run under emulation |
 | WSL2 on Windows | Linux, so yes |
 | Native Windows + MSVC | no, and not worth it (see below) |
 
@@ -107,6 +107,25 @@ ctest --test-dir build
 differ between the two platforms, and prints the macOS figures beside them so
 the comparison is immediate.
 
-To reproduce the Linux build without leaving macOS, `./scripts/linux_build.sh`
-runs it in a container (`ARCH=amd64` for x86-64 under emulation — functional
-verification only, for the memory-ordering reason above).
+## Verifying without a second machine
+
+`./scripts/linux_build.sh` builds and tests in a container. On arm64 that is
+native and complete: **66/66 tests pass**, with the environment report showing
+64-byte lines, 4 KB pages, a nanosecond clock and hard affinity.
+
+`ARCH=amd64 ./scripts/linux_build.sh` cross-builds for x86-64 under emulation.
+Two limits are worth stating, because both look like portability failures and
+neither is:
+
+- **The emulated compiler crashes on Catch2.** `g++` segfaults partway through
+  building it under qemu, so the test suite cannot be built there. Every
+  hotpath source compiles and all 14 tools run; the suite is built with
+  `-DBUILD_TESTING=OFF` and validated for real on native x86 in CI.
+- **Memory ordering is not reproducible under emulation.** qemu does not
+  faithfully model x86's TSO, so a clean `litmus_ring` result there would be
+  evidence of the emulator, not of the ISA. That experiment needs real
+  hardware — which is the whole reason it is worth running on yours.
+
+Build directories are per-architecture. Sharing one between arm64 and amd64
+runs made the x86 link pick up an arm64 `libCatch2.a` and fail with "file in
+wrong format", which looks exactly like a portability bug and is not one.
