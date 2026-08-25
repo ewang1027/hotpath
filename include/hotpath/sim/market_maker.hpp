@@ -2,6 +2,7 @@
 #include "hotpath/book/events.hpp"
 #include "hotpath/book/hybrid_book.hpp"
 #include "hotpath/sim/queue_model.hpp"
+#include "hotpath/sim/signals.hpp"
 
 #include <cstdint>
 
@@ -35,6 +36,12 @@ struct Fill {
 // *same* strategy code. If they ran separate copies, "the pipeline produces
 // identical fills" would only prove the two copies agreed, not that crossing a
 // lock-free ring preserved the semantics.
+// Which fill rule to apply. Both share every line of the quoting logic, so a
+// comparison between them isolates the fill model and nothing else -- if the
+// naive model lived in its own driver, differences in re-quoting or latency
+// handling would silently contaminate the result.
+enum class FillModel { QueueAware, Naive };
+
 class MarketMaker {
 public:
   // latency_ns models the round trip between deciding to move a quote and that
@@ -42,10 +49,30 @@ public:
   // market at its old price -- which is exactly how a slow participant gets
   // picked off. Zero reproduces the instantaneous-requote behaviour.
   MarketMaker(Price lo, Price hi, Qty quote_size, Ts latency_ns = 0,
+              FillModel fill_model = FillModel::QueueAware,
               std::size_t max_orders_pow2 = 1u << 21,
               std::size_t max_levels = 1u << 20)
       : book_(lo, hi, max_orders_pow2, max_levels),
-        quote_size_(quote_size), latency_(latency_ns) {}
+        quote_size_(quote_size), latency_(latency_ns), fill_model_(fill_model) {}
+
+  // Enable or disable quoting per side. A side switched off is cancelled, which
+  // like every other quote change takes `latency_` to take effect. Called by
+  // the driver from a signal computed on the PREVIOUS event -- you can only act
+  // on information you have already seen.
+  void set_quoting(bool allow_bid, bool allow_ask) noexcept {
+    allow_bid_ = allow_bid;
+    allow_ask_ = allow_ask;
+  }
+
+  // Top of book as the maker currently sees it, for the driver's signal.
+  [[nodiscard]] Touch touch() const noexcept {
+    const Price bb = book_.best_bid(), ba = book_.best_ask();
+    if (bb == kInvalidPrice || ba == kInvalidPrice || bb >= ba) return Touch{};
+    const auto* lb = book_.level_for(Side::Buy, bb);
+    const auto* la = book_.level_for(Side::Sell, ba);
+    if (!lb || !la) return Touch{};
+    return Touch{bb, ba, lb->qty, la->qty};
+  }
 
   // Applies one event and invokes cb(const Fill&) for each fill it produces.
   // Allocation-free: the book pools are pre-sized and fills go straight to the
@@ -99,8 +126,8 @@ public:
     const Price ba = book_.best_ask();
     if (bb == kInvalidPrice || ba == kInvalidPrice || bb >= ba) return;
 
-    decide(bid_, Side::Buy, bb, e.ts);
-    decide(ask_, Side::Sell, ba, e.ts);
+    decide(bid_, Side::Buy, bb, e.ts, allow_bid_);
+    decide(ask_, Side::Sell, ba, e.ts, allow_ask_);
 
     // With zero latency the decision lands within the same event, reproducing
     // instantaneous re-quoting exactly.
@@ -129,6 +156,7 @@ private:
     Qty   ahead_at_join{0};
     bool  in_flight{false};   // a replacement has been decided but not landed
     Ts    lands_at{0};
+    bool  want_active{true};  // what the in-flight change is trying to achieve
   };
 
   // Is our quote strictly more aggressive than the order that just traded? A
@@ -158,7 +186,10 @@ private:
     if (pre_px != q.px) return;
     switch (e.type) {
       case EventType::Execute: {
-        const Qty f = pos.on_execution(pre_seq, e.shares, q.remaining);
+        // The ONLY difference between the two models.
+        const Qty f = fill_model_ == FillModel::Naive
+                          ? (e.shares < q.remaining ? e.shares : q.remaining)
+                          : pos.on_execution(pre_seq, e.shares, q.remaining);
         if (f) {
           cb(Fill{e.ts, q.px, f, side, q.ahead_at_join, q.in_flight, false});
           q.remaining -= f;
@@ -175,18 +206,22 @@ private:
     }
   }
 
-  // Decide to move: the replacement is now in flight and lands `latency_` later.
-  // Crucially the old quote keeps resting at its old price in the meantime.
-  void decide(Quote& q, Side, Price target, Ts now) {
+  // Decide to move: the change is now in flight and lands `latency_` later.
+  // Crucially the old quote keeps resting at its old price in the meantime --
+  // including when the change is a cancellation, which is what makes pulling a
+  // quote on a signal cost something rather than being free.
+  void decide(Quote& q, Side, Price target, Ts now, bool allow) {
     if (q.in_flight) return;
-    if (q.active && q.px == target) return;
+    if (q.active == allow && (!q.active || q.px == target)) return;
     q.in_flight = true;
+    q.want_active = allow;
     q.lands_at = now + latency_;
   }
 
   void land_if_due(Quote& q, QueuePosition& pos, Side side, Price target, Ts now) {
     if (!q.in_flight || now < q.lands_at) return;
     q.in_flight = false;
+    if (!q.want_active) { q.active = false; pos.leave(); return; }
     join(q, pos, side, target);
   }
 
@@ -207,6 +242,9 @@ private:
   HybridBook book_;
   Qty quote_size_;
   Ts  latency_{0};
+  FillModel fill_model_{FillModel::QueueAware};
+  bool allow_bid_{true};
+  bool allow_ask_{true};
   Quote bid_, ask_;
   QueuePosition pos_bid_, pos_ask_;
   double mid_{0.0};

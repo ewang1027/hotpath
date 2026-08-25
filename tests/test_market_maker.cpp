@@ -38,7 +38,7 @@ std::vector<Fill> run(Ts latency) {
       del(1, kSettle + 1),           // best bid falls to 999900
       exec(3, 100, kSettle + 2),     // 100 shares trade at 999900
   };
-  MarketMaker mm(900000, 1100000, 100, latency, 1u << 12, 1u << 12);
+  MarketMaker mm(900000, 1100000, 100, latency, FillModel::QueueAware, 1u << 12, 1u << 12);
   std::vector<Fill> fills;
   for (const auto& e : tape) mm.on_event(e, [&](const Fill& f) { fills.push_back(f); });
   return fills;
@@ -57,7 +57,7 @@ TEST_CASE("maker: the initial quote placement also costs latency", "[sim][mm]") 
   // Not an edge case to design away -- getting your first order out takes just
   // as long as moving one, and at high latency that is part of why a slow maker
   // spends less time quoted.
-  MarketMaker mm(900000, 1100000, 100, 1'000'000, 1u << 12, 1u << 12);
+  MarketMaker mm(900000, 1100000, 100, 1'000'000, FillModel::QueueAware, 1u << 12, 1u << 12);
   std::vector<Fill> fills;
   auto sink = [&](const Fill& f) { fills.push_back(f); };
   mm.on_event(add(1, Side::Buy, 1000000, 500, 0), sink);
@@ -83,7 +83,7 @@ TEST_CASE("maker: a stale quote gets swept while the replacement is in flight",
 
 TEST_CASE("maker: an in-flight replacement lands once the latency elapses",
           "[sim][mm]") {
-  MarketMaker mm(900000, 1100000, 100, /*latency=*/1'000'000, 1u << 12, 1u << 12);
+  MarketMaker mm(900000, 1100000, 100, /*latency=*/1'000'000, FillModel::QueueAware, 1u << 12, 1u << 12);
   std::vector<Fill> fills;
   auto sink = [&](const Fill& f) { fills.push_back(f); };
 
@@ -112,7 +112,7 @@ TEST_CASE("maker: latency does not change behaviour when the touch is stable",
   };
   std::vector<std::size_t> counts;
   for (Ts L : {Ts(0), Ts(1'000), Ts(10'000), Ts(1'000'000)}) {
-    MarketMaker mm(900000, 1100000, 100, L, 1u << 12, 1u << 12);
+    MarketMaker mm(900000, 1100000, 100, L, FillModel::QueueAware, 1u << 12, 1u << 12);
     std::size_t n = 0;
     for (const auto& e : tape) mm.on_event(e, [&](const Fill&) { ++n; });
     counts.push_back(n);

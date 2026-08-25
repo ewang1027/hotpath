@@ -24,3 +24,9 @@ target_link_libraries(latency_sweep PRIVATE hotpath hotpath_instrument)
 
 add_executable(tape_stat tape_stat.cpp)
 target_link_libraries(tape_stat PRIVATE hotpath hotpath_instrument)
+
+add_executable(signal_study signal_study.cpp)
+target_link_libraries(signal_study PRIVATE hotpath hotpath_instrument)
+
+add_executable(strategy_eval strategy_eval.cpp)
+target_link_libraries(strategy_eval PRIVATE hotpath hotpath_instrument)

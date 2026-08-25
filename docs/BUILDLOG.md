@@ -415,6 +415,57 @@ fills, 0 on AMZN.
 
 ---
 
+## Phase 11 — microstructure signals, and a negative result  [DONE]
+
+The repo could measure but never predict, so every result was diagnostic and
+the honest answer to "what would you do with this?" was nothing. This closes
+that: build a real signal, act on it, and score it under both fill models.
+
+**Gate: PASS** in the sense that matters -- the experiment answered its
+question. The answer is no.
+
+- Queue imbalance and OFI genuinely forecast the 1s mid move on all 25 symbols
+  (correlation 0.045-0.219, monotone decile staircases), and are gone by 10s.
+- Gating quotes on the signal improves markout on **9 of 25** symbols, sign
+  test **p = 0.230**. A coin flip, with "significant" results in both
+  directions.
+- The reason is quantitative and worth more than the null itself: the signal's
+  entire top-to-bottom decile range is **0.07x-0.98x of one half-spread**,
+  while acting on it forfeits queue position. The forecast is real; it is not
+  worth a half-spread.
+
+### The false positive
+
+On AAPL alone the policy showed **+0.101 bps, paired 95% CI [+0.001, +0.208]**,
+significant at p<0.05, with a tidy mechanical story attached. It did not
+replicate across 25. Testing 25 symbols at the 5% level should throw roughly one
+false positive and this was it. It was caught only because the cross-sectional
+run was written before the number was looked at -- stopping at the first symbol
+is exactly what a result that clean invites.
+
+### Things worth keeping
+
+- **Stoikov's microprice tilt IS the queue imbalance**, algebraically:
+  `(microprice - mid)/(spread/2) = (Qb-Qa)/(Qb+Qa)`. Verified over 200k random
+  books and pinned by a test. The first `signal_study` output made it obvious by
+  printing two identical rows.
+- **The mirror control.** Pulling a quote forfeits queue position whichever
+  direction you pull it, so a one-sided policy can lose for reasons unrelated to
+  the signal. Running the exact opposite policy cancels that cost. Without it,
+  the first (wrongly signed) result looked like "the signal is worthless" rather
+  than "the sign is backwards" -- and it was the mirror that exposed the sign
+  error at all.
+- **Paired block bootstrap**, not two independent CIs. Both policies trade the
+  same market, so resampling the same 5-minute blocks for both cancels the
+  shared variance. The unpaired version called everything non-significant.
+- Sampling on a fixed time grid, not per event: events burst, and per-event
+  sampling would weight busy microseconds hundreds of times more than quiet
+  seconds.
+
+Full write-up in `SIGNALS.md`.
+
+---
+
 ## Remaining / not attempted
 
 Stated as gaps in the README rather than hidden: no network path or kernel

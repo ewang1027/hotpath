@@ -10,6 +10,16 @@ Everything below is from one full trading day — 2019-12-30, 8.25 GB,
 
 ## Results
 
+**A signal that predicts price does not make a passive strategy better — and
+the near-miss is the interesting part.** Queue imbalance forecasts the 1s mid
+move on all 25 symbols (correlation up to 0.22, monotone decile response), but
+gating quotes on it improves markout on only 9 of 25 (sign test p = 0.230).
+On AAPL alone it looked like a **+0.101 bps edge, significant at p < 0.05** —
+and it did not replicate. The reason it fails is quantitative: the signal's
+entire top-to-bottom decile range is 0.07x–0.98x of *one half-spread*, while
+acting on it forfeits queue position. The forecast is real; it just isn't worth
+a half-spread. [Details](docs/SIGNALS.md)
+
 **The naive fill model overstates passive volume by 3.4x to 15.6x** (median
 5.7x, measured on 25 symbols). Simulating a market maker joining the touch, a
 model that fills whenever the price trades books 3.5M shares on AAPL; a model
@@ -126,9 +136,9 @@ include/hotpath/
   itch/    zero-copy ITCH 5.0 views over an mmap, BinaryFILE framing
   book/    four order book designs behind one duck-typed interface
   ipc/     SPSC ring with ordering and padding as policy parameters
-  sim/     FIFO queue position, fill model, market maker
-src/       itch_stat, extract_tape, tape_stat, book_crossval,
-           sim_mm, latency_sweep, pipeline, litmus_ring
+  sim/     FIFO queue position, fill model, market maker, microstructure signals
+src/       itch_stat, extract_tape, tape_stat, book_crossval, sim_mm,
+           latency_sweep, signal_study, strategy_eval, pipeline, litmus_ring
 bench/     book design study, false-sharing experiment
 docs/      METHODOLOGY, PERFORMANCE, ADVERSE-SELECTION, BUILDLOG
 ```
