@@ -388,6 +388,21 @@ bugs, none of which any test was failing on.
    trivial, which is exactly why it survives review and every sanitizer.
    Replaced with an explicit `release()`.
 
+### And a fourth time -- but this one was not the gate's fault
+
+The gate failed with every design running 4-5x slower than recorded (hybrid 16.4
+-> 78.5 ns/event on AAPL). It was not a code regression: an unrelated
+application was using 37% of the CPU, and the slowdown was uniform across all
+four designs, which is what contention looks like. Two symbols fell below their
+ratio floor purely because of it.
+
+Reporting FAIL there is a lie about the code. The gate now uses the absolute
+ns/event -- the number established as useless for *thresholding* -- as a **load
+sentinel**: more than 2x the recorded idle figure means another workload owns
+the machine and the ratio is not worth judging either, so the design check
+reports SKIPPED and the run comes back INCONCLUSIVE rather than FAIL. The
+correctness gates, which do not depend on timing, still run and still gate.
+
 ### And the regression gate, loosened for a third time
 
 SPY and INTC kept flapping against the speedup floor (observed ranges: SPY
