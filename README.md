@@ -75,6 +75,18 @@ stages are wildly unbalanced. The fill streams hash identically to the
 single-threaded path, so the handoff is correct; it just does not pay here.
 [Details](docs/PERFORMANCE.md#threaded-tick-to-trade-pipeline)
 
+**The ITCH parser also exists in SystemVerilog, and the two agree on 2,057,603
+real messages.** `rtl/itch_parse.sv` is a byte-serial parser co-simulated
+against the C++ one under Verilator; the gate is that every decoded field
+matches. It caught two RTL bugs that nothing else would have: reading an
+accumulator in the same cycle that fills it (nonblocking assignments update at
+the end of the timestep, so every price came out a byte short), and emitting
+**stale flops** for fields a short message never carried — the RTL analogue of
+reading uninitialised memory, except no sanitizer can see a register that was
+never written. Decode latency is exactly 1 cycle after the final byte, which is
+the tail behaviour the software side of this repo cannot even measure.
+[Details](docs/RTL.md)
+
 **Market data needs a ring that drops messages, not one that blocks.** The
 cross-process `ShmRing` never stalls the publisher — you cannot backpressure an
 exchange — so it overwrites, and a lapped subscriber detects a **gap** rather
@@ -104,6 +116,7 @@ which is what makes this class of bug so dangerous.
 | Syscalls in steady state | **0** (enforced by dyld `__interpose`) |
 | ThreadSanitizer / ASan+UBSan | clean |
 | Fuzzing: ITCH parser + four-way book differential, under ASan | 550,000 iterations / 566 MB, 0 failures |
+| SystemVerilog parser vs C++ parser, every decoded field | **2,057,603** real messages, 0 mismatches |
 
 The cross-validation is not ceremony: it caught the intrusive book *silently
 dropping orders* when its level pool filled, which left the book permanently
@@ -144,6 +157,7 @@ Market data lives outside the repo (`$HOTPATH_DATA_DIR`, default
 ## Layout
 
 ```
+rtl/       ITCH parser in SystemVerilog + its co-simulation testbench
 include/hotpath/
   core/    types, cache-line constants, timebase, open-addressing hash map
   itch/    zero-copy ITCH 5.0 views over an mmap, BinaryFILE framing

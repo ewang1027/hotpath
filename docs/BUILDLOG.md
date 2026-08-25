@@ -633,6 +633,56 @@ shared memory is how you cross it without a copy through the kernel.
 
 ---
 
+## Phase 15 — the parser in SystemVerilog  [DONE]
+
+`rtl/itch_parse.sv`: a byte-serial ITCH 5.0 parser -- framing plus the seven
+book-mutating message types -- co-simulated against the C++ implementation under
+Verilator. The gate is that every decoded field matches on the same input.
+
+**Gate: PASS.** 7 hand-built messages, 4,000 randomised ones, a malformed-input
+case, and **2,057,603 messages of real NASDAQ data**, all decoded identically.
+Lint clean under `-Wall`.
+
+Same argument as the four book designs -- independent implementations agreeing
+over a large input -- but stronger here, because one side is RTL and the other
+C++, which rules out shared-assumption bugs that two C++ implementations could
+still hold in common.
+
+### Two RTL bugs it caught
+
+1. **Reading an accumulator in the cycle that fills it.** The first version
+   emitted on the same cycle as the last byte, and nonblocking assignments
+   update at the end of the timestep -- so every price and size came out short
+   by one byte. Caught on the first message. In isolation this looks like a
+   byte-order bug and gets "fixed" in the wrong place. The parser now emits one
+   cycle after the last byte, which is where its deterministic 1-cycle decode
+   latency comes from.
+
+2. **Emitting stale flops for fields the message does not carry.** A 12-byte
+   System Event never fills `acc_ref` (bytes 11-18), so the accumulator still
+   held the PREVIOUS message's order reference and the parser emitted it. This
+   is the RTL analogue of reading uninitialised memory, except stale flops are
+   invisible to every sanitizer that exists -- there is no ASan for a register
+   that was never written this message. Only a differential check against an
+   implementation that knows the field is absent finds it.
+
+### Why byte-serial
+
+At 30.7 bytes/message a 200 MHz byte-serial pipe sustains ~6.5 M msg/s, above
+what the feed delivers. Throughput is not the interesting axis. What hardware
+buys is that the decode completes a FIXED number of cycles after the last byte,
+every time, with no cache, branch predictor, scheduler or co-tenant involved --
+exactly the tail behaviour `METHODOLOGY.md` explains this laptop cannot measure.
+
+Verilator is the repo's only non-C++ dependency, so it stays out of the normal
+build and gets its own CI job and `scripts/cosim.sh`.
+
+**Not claimed:** simulated, not synthesised. No place-and-route, no timing
+closure, no FPGA; the 200 MHz is an assumption for a throughput argument, not a
+measured Fmax.
+
+---
+
 ## Remaining / not attempted
 
 Stated as gaps in the README rather than hidden: no network path or kernel

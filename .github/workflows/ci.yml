@@ -47,6 +47,16 @@ jobs:
       - name: Fuzz campaign
         run: ./build/tests/fuzz_campaign --iterations 20000 --seed ${{ github.run_number }}
 
+  # RTL co-simulation. Separate job because Verilator is the repo's only
+  # non-C++ dependency and the rest of the build must not require it.
+  cosim:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install verilator
+      - name: SystemVerilog vs C++ ITCH parser
+        run: ./scripts/cosim.sh
+
   litmus:
     # The memory-ordering demonstration. Only asserts that the release/acquire
     # ring is clean -- whether the relaxed variant *reproduces* a violation on a
