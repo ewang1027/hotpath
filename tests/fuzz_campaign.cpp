@@ -50,7 +50,8 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
       ++failures;
       std::printf("FAIL  iteration=%" PRIu64 " seed=%" PRIu64 " kind=%s size=%zu\n        %s\n",
-                  i, seed + i * 0x9E3779B97F4A7C15ull, kind, input.size(), e.what());
+                  i, static_cast<std::uint64_t>(seed + i * 0x9E3779B97F4A7C15ull),
+                  kind, input.size(), e.what());
       if (failures >= 10) { std::printf("stopping after 10 failures\n"); break; }
     }
     if ((i & 0xFFFF) == 0xFFFF)
@@ -59,7 +60,8 @@ int main(int argc, char** argv) {
 
   const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   std::printf("\n%" PRIu64 " iterations, %.1f MB of input, %.1fs (%.0f iter/s)\n",
-              iterations, bytes / 1e6, secs, iterations / (secs > 0 ? secs : 1));
+              iterations, static_cast<double>(bytes) / 1e6, secs,
+              static_cast<double>(iterations) / (secs > 0 ? secs : 1));
   std::printf("failures: %" PRIu64 "\n", failures);
   return failures ? 1 : 0;
 }

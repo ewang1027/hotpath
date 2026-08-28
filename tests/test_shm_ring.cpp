@@ -1,3 +1,4 @@
+#include "hotpath/bench/timing.hpp"
 #include "hotpath/ipc/shm_ring.hpp"
 
 #include <catch2/catch_test_macros.hpp>
@@ -123,7 +124,8 @@ TEST_CASE("shm ring: the producer does not slow down for a slow consumer",
         std::uint64_t next = 0, gap = 0, got = 0;
         while (!stop.load(std::memory_order_acquire)) {
           (void)sub.try_read(next, &got, sizeof got, gap);
-          for (volatile int k = 0; k < 200; ++k) {}   // deliberately sluggish
+          for (int k = 0; k < 200; ++k)                     // deliberately sluggish
+            hotpath::bench::do_not_optimize(k);
         }
       });
     }

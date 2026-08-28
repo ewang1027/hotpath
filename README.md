@@ -118,6 +118,7 @@ which is what makes this class of bug so dangerous.
 | Heap allocations in steady state | **0** on the dense path; every allocation reconciles 1:1 against a `std::map` overflow level |
 | Syscalls in steady state | **0** (enforced by dyld `__interpose`) |
 | ThreadSanitizer / ASan+UBSan | clean |
+| `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror` on three front-ends | clean on AppleClang 21 / libc++, GCC 13 / libstdc++, Clang 18 / libstdc++ |
 | Fuzzing: ITCH parser + four-way book differential, under ASan | 550,000 iterations / 566 MB, 0 failures |
 | SystemVerilog parser vs C++ parser, every decoded field | **2,057,603** real messages + 65,204 fuzzed, 0 mismatches |
 
@@ -162,24 +163,46 @@ Market data lives outside the repo (`$HOTPATH_DATA_DIR`, default
 ```
 rtl/       ITCH parser in SystemVerilog + its co-simulation testbench
 include/hotpath/
-  core/    types, cache-line constants, timebase, open-addressing hash map
+  core/    types, cache-line constants, timebase, open-addressing hash map,
+           platform probes, std::atomic_ref shim
   itch/    zero-copy ITCH 5.0 views over an mmap, BinaryFILE framing
   book/    four order book designs behind one duck-typed interface
   ipc/     SPSC ring with ordering and padding as policy parameters;
            cross-process shared-memory ring with gap detection
-  sim/     FIFO queue position, fill model, market maker, microstructure signals
+  sim/     FIFO queue position, fill model, market maker, microstructure
+           signals, block bootstrap
 src/       itch_stat, extract_tape, tape_stat, book_crossval, sim_mm,
            latency_sweep, signal_study, strategy_eval, pipeline, litmus_ring,
-           shm_pub, shm_sub
-bench/     book design study, false-sharing experiment
-docs/      METHODOLOGY, PERFORMANCE, ADVERSE-SELECTION, BUILDLOG
+           shm_pub, shm_sub, env_report; alloc/syscall instrumentation
+bench/     book design study, ring false-sharing experiment, parse decomposition
+tests/     unit + differential tests (Catch2), fuzz targets, fuzz campaign
+docs/      METHODOLOGY, PERFORMANCE, ADVERSE-SELECTION, SIGNALS, RTL,
+           PORTING, BUILDLOG
 ```
 
 ## Known gaps
 
-No network stack, kernel bypass, or NIC timestamping — the pipeline is
-in-process (threads and shared memory, not sockets). The fill model has no self-impact and no latency on re-quotes, so
-its fill counts remain an upper bound. One trading day, four symbols.
+**No network path.** No sockets, kernel bypass, or NIC timestamping. The
+pipeline is in-process (threads) and cross-process (shared memory), so
+"tick-to-trade" here means parse-to-decision, not wire-to-wire.
+
+**One trading day.** 2019-12-30, 25 symbols. The cross-section is wide; the time
+series is n = 1. Nothing here separates a stable effect from one day's regime,
+which is the single biggest caveat on every result above.
+
+**No tail latencies.** This hardware's clock ticks at 41.7 ns and cannot pin
+cores, so the numbers are means and medians, never p99/p99.9
+([METHODOLOGY](docs/METHODOLOGY.md)). Bare-metal x86 Linux is the missing piece.
+
+**The fill model has no self-impact**, and its re-quote latency is a fixed delay
+with no jitter — real latency has a distribution, and the tail is where the
+adverse selection lives. Queue position is tracked from the displayed book only;
+`behind_while_queued` measures how wrong that is rather than assuming it away
+(1.3–4.5% of executions are not at the level's FIFO head).
+
+**The RTL is simulated, not synthesised.** No place-and-route, no timing
+closure, no FPGA; the 200 MHz in [RTL.md](docs/RTL.md) is an assumption behind a
+throughput argument, not a measured Fmax.
 
 ## Related
 

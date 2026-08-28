@@ -17,6 +17,17 @@ set(CMAKE_CXX_FLAGS_DEBUG   "-O0 -g")
 # FetchContent dependencies (Catch2), whose warnings then bury ours.
 set(HOTPATH_WARNINGS -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion)
 
+# CI compiles with -Werror; local builds do not. A newer compiler inventing a
+# new diagnostic should not stop work in progress, but a warning must not be
+# able to accumulate unnoticed either -- and they had: ten of them, including a
+# dropped [[nodiscard]] and two printf format mismatches that only one of the
+# three front-ends could see. The gate is what makes "warning-clean" a fact
+# rather than a habit.
+option(HOTPATH_WERROR "Treat warnings as errors (used by CI)" OFF)
+if(HOTPATH_WERROR)
+  list(APPEND HOTPATH_WARNINGS -Werror)
+endif()
+
 # ---- sanitizer options (mutually exclusive builds) ----
 option(HOTPATH_ASAN "Build with AddressSanitizer + UBSan" OFF)
 option(HOTPATH_TSAN "Build with ThreadSanitizer" OFF)

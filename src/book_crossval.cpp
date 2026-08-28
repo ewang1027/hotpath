@@ -108,7 +108,8 @@ int main(int argc, char** argv) {
 
   std::printf("\n-- results --\n");
   std::printf("digest          : %016llx\n", (unsigned long long)digest.h);
-  std::printf("comparisons     : %zu\n", (tape.size() + check_every - 1) / check_every);
+  std::printf("comparisons     : %" PRIu64 "\n",
+              (static_cast<std::uint64_t>(tape.size()) + check_every - 1) / check_every);
   std::printf("divergences     : %" PRIu64 "\n", diverged);
   std::printf("final orders    : map=%zu intrusive=%zu flat=%zu hybrid=%zu\n",
               a.order_count(), b.order_count(), c.order_count(), d.order_count());

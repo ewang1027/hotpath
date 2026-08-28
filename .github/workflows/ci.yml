@@ -23,14 +23,14 @@ jobs:
       matrix:
         include:
           - name: release
-            flags: "-DCMAKE_BUILD_TYPE=Release"
+            flags: "-DCMAKE_BUILD_TYPE=Release -DHOTPATH_WERROR=ON"
           - name: tsan
-            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOTPATH_TSAN=ON"
+            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOTPATH_TSAN=ON -DHOTPATH_WERROR=ON"
           - name: asan-ubsan
-            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOTPATH_ASAN=ON"
+            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOTPATH_ASAN=ON -DHOTPATH_WERROR=ON"
     name: ${{ matrix.name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build tools
         run: brew install ninja
       - name: Configure
@@ -58,20 +58,27 @@ jobs:
       matrix:
         include:
           - name: release
-            flags: "-DCMAKE_BUILD_TYPE=Release"
+            flags: "-DCMAKE_BUILD_TYPE=Release -DHOTPATH_WERROR=ON"
           - name: asan-ubsan
-            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOTPATH_ASAN=ON"
+            flags: "-DCMAKE_BUILD_TYPE=RelWithDebInfo -DHOTPATH_ASAN=ON -DHOTPATH_WERROR=ON"
           # Builds core/atomic_ref.hpp's fallback on a toolchain that has the
           # real std::atomic_ref, so the shim cannot rot. Today the macOS jobs
           # take that path anyway -- their libc++ has no atomic_ref, which is
           # what the shim is for -- but they will stop doing so the moment the
           # runner image gains it, and then nothing would compile the fallback.
           - name: atomic-ref-fallback
-            flags: "-DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-DHOTPATH_FORCE_ATOMIC_REF_FALLBACK"
+            flags: "-DCMAKE_BUILD_TYPE=Release -DHOTPATH_WERROR=ON -DCMAKE_CXX_FLAGS=-DHOTPATH_FORCE_ATOMIC_REF_FALLBACK"
+          # clang against libstdc++ -- a different pairing from both AppleClang
+          # + libc++ and gcc + libstdc++. gcc caught three diagnostics the macOS
+          # build could not see (a dead store, a PRIu64 mismatch that is only
+          # wrong on LP64, a volatile deprecation); a third front-end is cheap
+          # insurance against the next one.
+          - name: clang
+            flags: "-DCMAKE_BUILD_TYPE=Release -DHOTPATH_WERROR=ON -DCMAKE_CXX_COMPILER=clang++"
     name: linux-${{ matrix.name }}
     steps:
-      - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build clang
       - run: cmake -S . -B build -G Ninja ${{ matrix.flags }}
       - run: cmake --build build
       - run: ctest --test-dir build --output-on-failure
@@ -88,7 +95,7 @@ jobs:
   cosim:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: brew install verilator
       - name: SystemVerilog vs C++ ITCH parser
         run: ./scripts/cosim.sh
@@ -99,9 +106,9 @@ jobs:
     # given run is microarchitectural and must not gate CI.
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: brew install ninja
-      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DHOTPATH_WERROR=ON
       - run: cmake --build build
       - name: Environment report
         run: ./build/src/hotpath_env

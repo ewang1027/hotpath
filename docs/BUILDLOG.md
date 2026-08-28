@@ -86,7 +86,7 @@ in `PERFORMANCE.md`.
 
 Headline: the textbook intrusive book is the *slowest* design on AAPL, losing
 even to `std::map`, because real books are ~4650 levels deep and its sorted
-level vector memmoves 5.7 GB per replay. The hybrid design (grid addressing +
+level vector memmoves 2.9 GB per replay. The hybrid design (grid addressing +
 per-level intrusive FIFO) that the measurements implied is 3.3x the baseline and
 keeps the time-priority ordering the fill model needs.
 
@@ -755,6 +755,73 @@ reference exactly.
   not the same as "fix the build". Grepping the whole tree for the other
   late-landing C++20 library features (`bit_cast`, `span`, `format`, `ranges`,
   `jthread`, `<bit>`) before pushing confirmed `atomic_ref` was the only one.
+
+---
+
+## Phase 17 — a warning gate, and the three things it found  [DONE]
+
+The build had accumulated **ten warnings** in its own code, none of them
+visible in CI because nothing failed on them. Fixed at the source rather than
+suppressed, then pinned with `-DHOTPATH_WERROR=ON` on every CI configure.
+`-Werror` is deliberately *not* on by default locally: a newer compiler
+inventing a diagnostic should not stop work in progress, but it must not be
+able to pile up unnoticed either.
+
+**Gate: PASS** — clean on all three front-ends, 66/66 tests on each:
+AppleClang 21 / libc++, GCC 13.3 / libstdc++, Clang 18.1 / libstdc++.
+
+Three of the ten were invisible to the dev machine's compiler, which is the
+argument for the third front-end rather than a preference about compilers:
+
+- **A dead store.** `strategy_eval.cpp` computed `skew_cost[m]` and never read
+  it — a leftover from a summary line that no longer exists. Nothing published
+  was wrong (the value is already printed inline in the per-policy table), but
+  it is exactly the shape of a dropped analysis.
+- **A `PRIu64` mismatch that is only wrong on LP64.** `seed + i * 0x9E37...ull`
+  is `unsigned long long`, while `PRIu64` expands to `"lu"` on Linux — same
+  width, different type, UB by the letter. On macOS `PRIu64` is `"llu"` and the
+  bug does not exist.
+- **A `volatile` deprecation** in the slow-consumer spin. C++20 deprecates both
+  `++k` and `k = k + 1` through a volatile lvalue; clang flags the first, gcc
+  the second. Replaced with the repo's own `do_not_optimize` barrier, which is
+  what the loop meant in the first place.
+
+### Traps hit
+
+- **`scripts/linux_build.sh` filtered its build output on `"error:"` only**, so
+  the Linux container — the one place that could see the gcc-only diagnostics —
+  was discarding them before they reached the terminal. A tool that verifies a
+  port has to show what the port's compiler says. Now matches `warning:` too.
+- **Fixing a warning can introduce one on another compiler.** The first
+  `volatile` fix (`k = k + 1`) silenced clang and tripped gcc. Three front-ends
+  is the check; one is a guess.
+
+---
+
+## Phase 18 — a claims audit  [DONE]
+
+Every number in the docs is a claim that has to survive someone checking it.
+Two did not.
+
+- **The memmove volume was 2x too high in two places.** `hybrid_book.hpp` and
+  this log both said the intrusive book memmoves **5.7 GB** per replay. The
+  shipped level index is `std::vector<std::int32_t>` — 4 bytes — so the real
+  figure is **2.9 GB**; 5.7 GB is that number at the 8-byte entries of the
+  *rejected* optimisation. `intrusive_book.hpp:182` had it right all along and
+  `tape_stat` measures 2866 MB, so the repo was already contradicting itself in
+  writing. Phase 2 records this exact bug class as found and fixed; two
+  instances survived that fix. The error flattered the design being argued for,
+  which is the direction that deserves the most suspicion.
+- **The README's "Known gaps" contradicted three of its own headline results.**
+  It claimed the fill model has "no latency on re-quotes" — there is an entire
+  result about sweeping re-quote latency from 0 to 10 ms, and Phase 7 built it
+  — and said "four symbols" where everything else says 25. Rewritten against
+  what the code actually does, and extended with the gaps that were true but
+  unstated: no tail latencies, and the RTL is simulated rather than synthesised.
+
+The lesson is the same one Phase 2 already recorded and this phase had to
+record again: a number that lives in prose rots independently of the code that
+produced it. The ones that survive are the ones a committed tool regenerates.
 
 ---
 

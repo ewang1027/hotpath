@@ -152,7 +152,8 @@ int main(int argc, char** argv) {
   std::printf("OFI tau     : %.0f ms\n", tau_ns / 1e6);
   if (samples.size() < 200) { std::printf("\nnot enough samples to say anything\n"); return 1; }
   std::printf("session     : %.2f h .. %.2f h\n",
-              samples.front().ts / 3.6e12, samples.back().ts / 3.6e12);
+              static_cast<double>(samples.front().ts) / 3.6e12,
+              static_cast<double>(samples.back().ts) / 3.6e12);
   std::printf("\nDecile columns run from the most negative signal to the most positive.\n"
               "A real signal shows a monotone staircase, not just a correlation.\n");
 

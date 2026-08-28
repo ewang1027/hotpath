@@ -202,7 +202,6 @@ int main(int argc, char** argv) {
   std::printf("             two independent CIs would be a far weaker test.\n");
 
   const Ts kBlock = 300 * kSec;   // 5-minute blocks for the paired bootstrap
-  double skew_cost[2] = {0, 0};
   double thin_minus_heavy[2][2] = {};
   bool   thin_sig[2][2] = {};
   for (int m = 0; m < 2; ++m) {
@@ -224,7 +223,6 @@ int main(int argc, char** argv) {
         const Interval d = paired_block_bootstrap(to_obs(o.obs), to_obs(outs[0].obs), kBlock);
         std::printf("   %+7.3f [%+7.3f,%+7.3f] %s", d.point, d.lo, d.hi,
                     d.excludes_zero() ? "SIGNIF" : "n.s.");
-        if (i == 1) skew_cost[m] = d.point;
       }
       std::printf("\n");
     }

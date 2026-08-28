@@ -43,7 +43,12 @@ docker build ${PLATFORM} -t "$TAG" -f docker/Dockerfile.linux docker/ >/dev/null
 docker run --rm ${PLATFORM} -v "$PWD:/src" -w /src "$TAG" bash -euo pipefail -c '
   echo "== uname =="; uname -m; echo
   cmake -S . -B '"$BUILD"' -DCMAKE_BUILD_TYPE=Release '"$EXTRA"' >/dev/null
-  cmake --build '"$BUILD"' -j"$(nproc)" 2>&1 | grep -E "error:|Error" || true
+  # Surface warnings, not just errors. This filter used to match "error:" only,
+  # which is how three gcc-only diagnostics -- a dead store, a PRIu64 mismatch
+  # that is wrong only on LP64, and a volatile deprecation -- stayed invisible
+  # on the platform that could see them. _deps is Catch2 and is not ours.
+  cmake --build '"$BUILD"' -j"$(nproc)" 2>&1 \
+    | grep -E "error:|warning:|Error" | grep -v "_deps/" || true
   echo "== environment =="
   ./'"$BUILD"'/src/hotpath_env
   echo

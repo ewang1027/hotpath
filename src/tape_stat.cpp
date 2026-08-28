@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
   std::printf("\n-- event mix --\n");
   const char* names[5] = {"Add", "Execute", "Cancel", "Delete", "Replace"};
   for (int i = 0; i < 5; ++i)
-    std::printf("  %-9s %12" PRIu64 "  %5.2f%%\n", names[i], per_type[i], 100.0 * per_type[i] / n);
+    std::printf("  %-9s %12" PRIu64 "  %5.2f%%\n", names[i], per_type[i], 100.0 * static_cast<double>(per_type[i]) / n);
 
   std::printf("\n-- inter-event time (ns) --\n");
   std::printf("  all events        p10=%-10" PRIu64 " p50=%-10" PRIu64 " p90=%" PRIu64 "\n",
@@ -96,6 +96,7 @@ int main(int argc, char** argv) {
               static_cast<double>(ib.elements_shifted()) /
                   static_cast<double>(ib.level_creates() + ib.level_destroys()));
   std::printf("  bytes memmoved    : %.1f MB  (%.2f KB per event)\n",
-              ib.elements_shifted() * 4.0 / 1e6, ib.elements_shifted() * 4.0 / n / 1e3);
+              static_cast<double>(ib.elements_shifted()) * 4.0 / 1e6,
+              static_cast<double>(ib.elements_shifted()) * 4.0 / n / 1e3);
   return 0;
 }

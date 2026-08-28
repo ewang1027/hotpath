@@ -80,7 +80,9 @@ TEST_CASE("queue: over-cancel cannot underflow the position", "[sim][queue]") {
 TEST_CASE("queue: re-joining resets us to the back", "[sim][queue]") {
   QueuePosition q;
   q.join(100, kJoin);
-  q.on_execution(kAfter, 100, 100);
+  // Consumes exactly the volume ahead of us, so nothing trades through to
+  // our order: the queue empties but we are not filled.
+  REQUIRE(q.on_execution(kAfter, 100, 100) == 0);
   REQUIRE(q.ahead() == 0);
 
   q.join(800, 200);                // touch moved; we re-quoted

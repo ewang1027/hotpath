@@ -16,8 +16,10 @@ namespace hotpath::book {
 // maintenance by ~3.5x because price lookup is arithmetic and nothing ever
 // shifts. The textbook intrusive book loses even to std::map, because a real
 // book runs thousands of levels deep (AAPL: mean 4652, max 5320) and a sorted
-// level vector shifts ~1946 elements per level create/destroy -- 5.7 GB of
-// memmove per replay.
+// level vector shifts ~1946 elements per level create/destroy -- 2.9 GB of
+// memmove per replay at its 4-byte entries (measured: `tape_stat` reports
+// 2866 MB on AAPL). 5.7 GB is the same figure for the 8-byte entries an
+// earlier version used and measurement rejected; see intrusive_book.hpp.
 //
 // But the grid throws away per-level order identity, and the intrusive lists
 // are exactly what a queue-position model needs: ITCH fills a level in strict
