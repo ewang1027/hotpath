@@ -45,12 +45,22 @@ enum class MsgType : char {
 namespace detail {
 struct SpecLengthTable {
   std::uint16_t v[256]{};
+  // Plain `char` is signed on macOS and x86-64, unsigned on arm64 Linux, so a
+  // char subscript is a -Wchar-subscripts diagnostic wherever it could go
+  // negative. Every key here is 7-bit ASCII so nothing was ever out of range,
+  // but spec_length() below already casts and the table should not disagree
+  // with its own accessor. Older AppleClang warns here; clang 21 and gcc do
+  // not, having proved the constants in range -- which is why CI caught this
+  // and three local toolchains did not.
+  constexpr void set(char t, std::uint16_t n) noexcept {
+    v[static_cast<unsigned char>(t)] = n;
+  }
   constexpr SpecLengthTable() {
-    v['S'] = 12; v['R'] = 39; v['H'] = 25; v['Y'] = 20; v['L'] = 26;
-    v['V'] = 35; v['W'] = 12; v['K'] = 28; v['J'] = 35; v['h'] = 21;
-    v['A'] = 36; v['F'] = 40; v['E'] = 31; v['C'] = 36; v['X'] = 23;
-    v['D'] = 19; v['U'] = 35; v['P'] = 44; v['Q'] = 40; v['B'] = 19;
-    v['I'] = 50; v['N'] = 20;
+    set('S', 12); set('R', 39); set('H', 25); set('Y', 20); set('L', 26);
+    set('V', 35); set('W', 12); set('K', 28); set('J', 35); set('h', 21);
+    set('A', 36); set('F', 40); set('E', 31); set('C', 36); set('X', 23);
+    set('D', 19); set('U', 35); set('P', 44); set('Q', 40); set('B', 19);
+    set('I', 50); set('N', 20);
   }
 };
 inline constexpr SpecLengthTable kSpecLength{};
@@ -59,6 +69,18 @@ inline constexpr SpecLengthTable kSpecLength{};
 [[nodiscard]] constexpr std::uint16_t spec_length(char t) noexcept {
   return detail::kSpecLength.v[static_cast<unsigned char>(t)];
 }
+
+// The table is built by a constexpr loop of writes, so a refactor of how those
+// writes are spelled could silently produce a different table -- and a wrong
+// spec length does not crash, it mis-validates a 268-million-message file.
+// Pin it at compile time: the two hottest types, one rare type, the high-bit
+// case that motivated the unsigned cast, and "not in the table".
+static_assert(spec_length('A') == 36, "AddOrder");
+static_assert(spec_length('D') == 19, "OrderDelete");
+static_assert(spec_length('I') == 50, "NOII");
+static_assert(spec_length('h') == 21, "OperationalHalt (lowercase key)");
+static_assert(spec_length('\0') == 0, "absent key reads zero");
+static_assert(spec_length(static_cast<char>(0xFF)) == 0, "high-bit key is in range");
 
 // Every ITCH message begins with this header, so 11 bytes is the universal
 // minimum length for a well-formed message of ANY type -- including a type this

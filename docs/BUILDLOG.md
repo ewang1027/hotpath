@@ -795,6 +795,23 @@ argument for the third front-end rather than a preference about compilers:
 - **Fixing a warning can introduce one on another compiler.** The first
   `volatile` fix (`k = k + 1`) silenced clang and tripped gcc. Three front-ends
   is the check; one is a guess.
+- **Three clean local toolchains still did not equal a clean CI.** Turning
+  `-Werror` on went red immediately on `-Wchar-subscripts`: the spec-length
+  table is indexed by `char` literals, and `char` is signed on macOS. Nothing
+  was out of range — every key is 7-bit ASCII — and `spec_length()` already
+  cast, so only the table disagreed with its own accessor. It stayed invisible
+  locally for two separate reasons at once: the container is arm64 Linux, where
+  `char` is *unsigned*, and clang 21 and gcc 13 both prove the constants in
+  range and stay quiet. Only the runner's older AppleClang warns. The lesson is
+  the same one `atomic_ref` taught two phases ago and it did not stick: the CI
+  compiler is a fourth toolchain, not a copy of the dev machine's.
+- **`ninja` stops at the first failing target, and clang stops at 20 errors per
+  file**, so one red run shows one problem and hides the rest. CI builds with
+  `-- -k 0` now, which turns "iterate once per warning against a compiler you
+  cannot run locally" into a single round trip.
+- The table is now pinned by `static_assert` on six entries, including the
+  high-bit key that motivated the cast. A wrong spec length does not crash —
+  it mis-validates a 268-million-message file.
 
 ---
 
