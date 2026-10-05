@@ -141,7 +141,7 @@ design fails wherever churn × depth crosses a few hundred elements per event.
 The flat grid is 2.5–3.6x the baseline because price lookup is arithmetic and
 nothing ever shifts. But an aggregate-only grid throws away *which* orders are
 resting at a level, and ITCH fills a level in strict time priority — so that
-FIFO order **is** queue position, which the fill model in Phase 4 depends on.
+FIFO order **is** queue position, which the fill model in `ADVERSE-SELECTION.md` depends on.
 
 Across all 25 symbols the hybrid beats `std::map` by **1.96x to 3.89x**
 (median 2.62x) and beats the intrusive design on **25 of 25**, by up to **7.3x**

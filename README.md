@@ -177,7 +177,7 @@ src/       itch_stat, extract_tape, tape_stat, book_crossval, sim_mm,
 bench/     book design study, ring false-sharing experiment, parse decomposition
 tests/     unit + differential tests (Catch2), fuzz targets, fuzz campaign
 docs/      METHODOLOGY, PERFORMANCE, ADVERSE-SELECTION, SIGNALS, RTL,
-           PORTING, BUILDLOG
+           PORTING
 ```
 
 ## Known gaps

@@ -84,7 +84,7 @@ void operator delete[](void* p, std::size_t, std::align_val_t a) noexcept { ::op
 // macOS has no LD_PRELOAD, but dyld honours a __DATA,__interpose section that
 // swaps a libSystem symbol for ours process-wide. It is silently ignored when
 // the instrumentation is a static archive, which is why hotpath_instrument is
-// built SHARED (see docs/BUILDLOG.md).
+// built SHARED.
 //
 // Linux is simpler: a definition in a shared object that precedes libc in the
 // link order preempts the libc symbol for the whole process, with no special

@@ -6,7 +6,7 @@
 // an interesting way -- except that here one of them is hardware.
 //
 // It also checks the malformed-input strobes, because that is where the C++
-// side had two out-of-bounds reads (docs/BUILDLOG.md): a parser that silently
+// side had two out-of-bounds reads, found by fuzzing: a parser that silently
 // accepts an under-length message hands downstream logic fields it never
 // received. In RTL the same mistake reads stale flops instead of stale memory,
 // which is harder to notice and impossible for a sanitizer to catch.

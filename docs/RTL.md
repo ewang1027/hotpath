@@ -173,9 +173,9 @@ trade.
 The parser refuses to emit a message whose body is shorter than the 11-byte
 common header, raising `e_short` instead. This is not defensive
 over-engineering: the C++ parser had **two heap-buffer-overflows** from exactly
-this omission (`BUILDLOG.md` phase 13), and the co-simulation checks that both
-implementations reject the same inputs rather than merely agreeing on the ones
-they accept.
+this omission (both found by fuzzing, see `tests/fuzz/`), and the co-simulation
+checks that both implementations reject the same inputs rather than merely
+agreeing on the ones they accept.
 
 ## Not claimed
 

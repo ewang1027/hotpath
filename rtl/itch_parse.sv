@@ -42,7 +42,7 @@ module itch_parse (
     output logic        m_book_event,  // type is one of A F E C X D U
 
     // Malformed-input strobes. A parser that silently accepts these is how the
-    // software version ended up with two out-of-bounds reads (docs/BUILDLOG.md).
+    // software version ended up with two out-of-bounds reads (both found by fuzzing).
     output logic        e_short,       // body shorter than the 11-byte header
     output logic        e_zero_len     // zero-length frame: end of stream
 );

@@ -21,7 +21,7 @@ cmake --build build >/dev/null
 echo "===== environment (docs/METHODOLOGY.md) ====="
 ./build/src/hotpath_env
 
-echo; echo "===== full-day parse gate (docs/BUILDLOG.md) ====="
+echo; echo "===== full-day parse gate ====="
 ./build/src/itch_stat "$RAW"
 
 echo; echo "===== tape extraction ====="

@@ -9,3 +9,6 @@ data/
 .DS_Store
 compile_commands.json
 .cache/
+
+# Personal working notes, kept locally
+docs/BUILDLOG.md
