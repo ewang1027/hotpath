@@ -10,7 +10,7 @@ namespace hotpath::book {
 // A book-mutating event, normalised out of ITCH and resolved to one symbol.
 //
 // Why a separate tape instead of parsing ITCH in the benchmark loop: the three
-// book designs must see byte-identical input, and re-parsing 12 GB per design
+// book designs must see byte-identical input, and re-parsing 8.25 GB per design
 // per trial would make the parse dominate the thing being compared. Extracting
 // once to a compact array isolates the variable.
 //

@@ -13,7 +13,7 @@ namespace hotpath::itch {
 
 // Read-only mmap of the decompressed ITCH file.
 //
-// Why mmap and not read(): the parse is a single forward pass over ~12 GB. A
+// Why mmap and not read(): the parse is a single forward pass over 8.25 GB. A
 // read() loop would copy every byte into a userspace buffer first; mapping it
 // lets the parser touch page-cache pages directly, so the message views point
 // straight at the kernel's copy and the hot loop performs no I/O calls at all.
@@ -33,7 +33,7 @@ public:
     if (p == MAP_FAILED) { ::close(fd_); throw std::runtime_error("mmap failed: " + path); }
     data_ = static_cast<const std::uint8_t*>(p);
     // One-time hint, at startup, outside any measured region. Tells the kernel
-    // to read ahead aggressively and drop pages behind us -- without it a 12 GB
+    // to read ahead aggressively and drop pages behind us -- without it an 8.25 GB
     // sequential pass evicts everything else on the machine.
     ::madvise(const_cast<void*>(p), size_, MADV_SEQUENTIAL);
   }
