@@ -89,9 +89,10 @@ jobs:
       - name: Environment (clock resolution differs from macOS by ~40x)
         run: ./build/src/hotpath_env
       - name: Memory ordering on x86-64 TSO
-        # On arm64 the relaxed ring reports thousands of violations. On x86 it
-        # should report zero -- the claim litmus_ring makes but cannot check on
-        # a single machine.
+        # On arm64 the relaxed ring can report violations (how many depends on
+        # the machine, sometimes none). On x86 it should report zero. Either
+        # way the relaxed variant is a data race, so zero here proves nothing
+        # about its correctness.
         run: ./build/src/litmus_ring --rounds 10
 
   # RTL co-simulation. Separate job because Verilator is the repo's only
